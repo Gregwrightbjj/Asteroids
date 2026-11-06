@@ -2,6 +2,8 @@ import pygame  # library: code someone else wrote, used for the window and drawi
 from constants import SCREEN_WIDTH, SCREEN_HEIGHT  # values stored in constants.py
 from logger import log_state  # function (named reusable code) that writes game_state.jsonl
 from player import Player  # main.py must know the name Player to create one
+from asteroid import Asteroid  # NEW: needed to set Asteroid.containers below
+from asteroidfield import AsteroidField  # NEW: the task says to import it
 
 
 def main():  # def starts a function; the whole game runs inside main()
@@ -16,12 +18,16 @@ def main():  # def starts a function; the whole game runs inside main()
 
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))  # opens the window; screen = a Surface (pixels you can draw on)
 
-    updatable = pygame.sprite.Group()  # T1: Group = a container that holds many game objects; this one holds things that need update()
-    drawable = pygame.sprite.Group()  # T1: this one holds things that need draw(); one object can be in several groups
+    updatable = pygame.sprite.Group()  # Group = container for many game objects; this one needs update()
+    drawable = pygame.sprite.Group()  # this one needs draw(); an object can be in several groups
+    asteroids = pygame.sprite.Group()  # NEW: holds only asteroids, so later lessons can check "every asteroid" without the player
 
-    Player.containers = (updatable, drawable)  # T2: containers = groups every new Player auto-joins; set on the CLASS (the blueprint), so it must come BEFORE Player(...) is created
+    Player.containers = (updatable, drawable)  # containers = groups every new Player auto-joins; set on the CLASS, before any Player exists
+    Asteroid.containers = (asteroids, updatable, drawable)  # NEW: static field (stored on the class, shared by all objects); every Asteroid lands in all 3 groups
+    AsteroidField.containers = (updatable,)  # NEW: only updatable (needs update for its timer, draws nothing, isn't an asteroid); the comma makes a 1-item tuple
 
-    player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)  # instantiate = create an object; it joins both groups automatically
+    player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)  # instantiate = create an object; starts at the center
+    asteroid_field = AsteroidField()  # NEW: creates the spawner; after containers is set, as the task says
 
     while True:  # game loop: repeats forever; each trip is one frame (one picture)
         log_state()  # writes the game's state to the log file each frame
@@ -30,11 +36,11 @@ def main():  # def starts a function; the whole game runs inside main()
             if event.type == pygame.QUIT:  # QUIT = the window's X button was clicked
                 return  # ends main(), which exits the loop and closes the game
 
-        updatable.update(dt)  # T3.1: calls .update(dt) on EVERY object in the group; replaces player.update(dt)
+        updatable.update(dt)  # calls update(dt) on every member: player keys, asteroid movement, spawn timer
 
         screen.fill("black")  # paints every pixel black, wiping the last frame
-        for obj in drawable:  # T3.2: iterate = visit each item in the group one by one; obj = the current one
-            obj.draw(screen)  # draws each object; replaces player.draw(screen); after fill (else black covers it), before flip
+        for obj in drawable:  # visit each drawable object one by one
+            obj.draw(screen)  # draws the player and every asteroid
         pygame.display.flip()  # shows the finished picture in the window
         dt = clock.tick(60) / 1000  # waits so the game runs at most 60 FPS; ms / 1000 = seconds
 
