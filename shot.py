@@ -1,14 +1,20 @@
-import pygame  # needed for pygame.draw.circle; each file needs its own imports
-from circleshape import CircleShape  # the parent class we inherit from
-from constants import SHOT_RADIUS, LINE_WIDTH  # bullet size and outline thickness
+import pygame  # needed for pygame.draw.circle
+from circleshape import CircleShape  # parent class
+from constants import SHOT_RADIUS, SHOT_LIFETIME_SECONDS, LINE_WIDTH
 
 
-class Shot(CircleShape):  # T2: class = blueprint for objects; (CircleShape) = inherit position, velocity, radius
-    def __init__(self, x, y):  # T2: constructor runs on creation; self = this object; accepts only x and y
-        super().__init__(x, y, SHOT_RADIUS)  # super() = parent class; every bullet is the same size, so the radius is filled in here
+class Shot(CircleShape):  # a bullet: a small circle flying in a straight line
+    def __init__(self, x, y, radius=SHOT_RADIUS, pierce=False):  # default parameters: old calls like Shot(x, y) still work
+        super().__init__(x, y, radius)  # runs the parent's setup
+        self.pierce = pierce  # True = survives hitting an asteroid
+        self.age = 0.0  # seconds lived so far
 
-    def draw(self, screen):  # override = same name as parent's draw, so this version runs instead
+    def draw(self, screen):  # override = this version runs instead of the parent's
         pygame.draw.circle(screen, "white", self.position, self.radius, LINE_WIDTH)  # surface, color, center, radius, outline width
 
-    def update(self, dt):  # override: moves the bullet in a straight line; dt = seconds since last frame
-        self.position += self.velocity * dt  # velocity = speed + direction (Vector2); x dt = same speed on any computer. Ex: (0, 500) * 0.0167 = (0, 8.35) per frame
+    def update(self, dt):  # runs once per frame
+        self.age += dt  # += add and save back
+        if self.age >= SHOT_LIFETIME_SECONDS:  # too old?
+            self.kill()  # kill() = remove from all groups, so it vanishes
+            return  # stop here; skip the move
+        self.position += self.velocity * dt  # velocity x dt = same speed on any computer

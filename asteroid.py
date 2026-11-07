@@ -1,37 +1,65 @@
-import random  # NEW: Python's built-in random numbers; split() uses random.uniform
-import pygame  # needed for pygame.draw.circle; each file needs its own imports
-from logger import log_event  # NEW: split() records "asteroid_split" in game_events.jsonl
-from circleshape import CircleShape  # the parent class we inherit from
-from constants import LINE_WIDTH, ASTEROID_MIN_RADIUS  # ASTEROID_MIN_RADIUS is NEW: split() compares against it and subtracts it
+import random  # built-in random numbers
+import pygame
+from logger import log_event  # records events in game_events.jsonl
+from circleshape import CircleShape  # parent class
+from particle import spawn_explosion  # the explosion effect
+from constants import (  # parentheses let one import span several lines
+    LINE_WIDTH,
+    ASTEROID_MIN_RADIUS,
+    ASTEROID_MAX_RADIUS,
+    ASTEROID_MIN_VERTICES,
+    ASTEROID_MAX_VERTICES,
+    ASTEROID_LUMPINESS,
+    ASTEROID_MAX_SPIN,
+    SCORE_LARGE,
+    SCORE_MEDIUM,
+    SCORE_SMALL,
+)
 
 
-class Asteroid(CircleShape):  # class = blueprint for objects; (CircleShape) = inherit position, radius, velocity
-    def __init__(self, x: float, y: float, radius: float) -> None:  # constructor runs on creation; float = decimal number; -> None = returns nothing
-        super().__init__(x, y, radius)  # super() = parent class; runs its setup
+class Asteroid(CircleShape):  # (CircleShape) = inherit position, velocity, radius, wrap, collides_with
+    def __init__(self, x: float, y: float, radius: float) -> None:  # float = decimal number; -> None = returns nothing
+        super().__init__(x, y, radius)  # parent setup first
+        self.angle = 0.0  # current spin angle in degrees
+        self.spin = random.uniform(-ASTEROID_MAX_SPIN, ASTEROID_MAX_SPIN)  # degrees per second
+        count = random.randint(ASTEROID_MIN_VERTICES, ASTEROID_MAX_VERTICES)  # number of corners
+        self.offsets = []  # offset = a corner's position relative to the center
+        for i in range(count):
+            corner_angle = i * 360 / count  # spread corners evenly around the circle
+            distance = radius * random.uniform(1 - ASTEROID_LUMPINESS, 1)  # pulled inward: shape never pokes outside the hitbox
+            self.offsets.append(pygame.Vector2(distance, 0).rotate(corner_angle))  # rotate returns a NEW vector
 
-    def draw(self, screen):  # override = same name as parent's draw, so this version runs instead
-        pygame.draw.circle(screen, "white", self.position, self.radius, LINE_WIDTH)  # surface, color, center, radius, outline width
+    def draw(self, screen):  # override: lumpy polygon instead of a circle (the HITBOX is still a circle)
+        points = [self.position + offset.rotate(self.angle) for offset in self.offsets]  # list comprehension: for each offset, spin it, then add the center
+        pygame.draw.polygon(screen, "white", points, LINE_WIDTH)  # polygon = shape from points; width 2 = outline
 
-    def update(self, dt: float) -> None:  # override: moves the asteroid; dt = seconds since last frame
-        self.position += self.velocity * dt  # velocity = speed + direction (Vector2); x dt = same speed on any computer
+    def update(self, dt: float) -> None:  # override
+        self.angle += self.spin * dt  # tumble
+        self.position += self.velocity * dt  # drift in a straight line
+        self.wrap(ASTEROID_MAX_RADIUS)  # margin = spawn distance, so fresh spawns aren't teleported
 
-    def split(self):  # NEW: destroys this asteroid and maybe spawns two smaller, faster ones. Sizes (radius): large 60, medium 40, small 20
-        self.kill()  # T1: kill() removes it from all its groups; first, because it always happens. position and radius still work afterward
+    def points(self):  # asteroid knows its own size, so it says what it's worth
+        if self.radius <= ASTEROID_MIN_RADIUS:  # small
+            return SCORE_SMALL
+        elif self.radius <= ASTEROID_MIN_RADIUS * 2:  # medium
+            return SCORE_MEDIUM
+        return SCORE_LARGE  # otherwise large
 
-        if self.radius <= ASTEROID_MIN_RADIUS:  # T2: <= means "less than or equal to". Ex: 20 <= 20 is True = small asteroid
-            return  # return = end the method now; small asteroids just disappear
+    def split(self):  # destroys this asteroid; big ones leave two smaller, faster ones
+        spawn_explosion(self.position, count=int(self.radius / 2))  # radius 40 = 20 particles
+        self.kill()  # always destroyed; position and radius still readable afterward
 
-        log_event("asteroid_split")  # T3.1: records the split; text must match exactly
+        if self.radius <= ASTEROID_MIN_RADIUS:  # small asteroid: just disappears
+            return  # return = end the method now
 
-        random_angle = random.uniform(20, 50)  # T3.2: random decimal between 20 and 50 degrees. Ex: 31.7
+        log_event("asteroid_split")  # text must match what the lesson tests expect
 
-        first_velocity = self.velocity.rotate(random_angle)  # T3.3: rotate() turns an arrow and returns a NEW vector. Ex: (60, 0) rotated 30 = about (51.96, 30)
-        second_velocity = self.velocity.rotate(-random_angle)  # T3.4: minus sign = opposite direction, so the pair fans out on either side
+        random_angle = random.uniform(20, 50)  # random decimal between 20 and 50 degrees
+        first_velocity = self.velocity.rotate(random_angle)  # new arrow, turned one way
+        second_velocity = self.velocity.rotate(-random_angle)  # minus = the opposite way
+        new_radius = self.radius - ASTEROID_MIN_RADIUS  # 60 -> 40, 40 -> 20
 
-        new_radius = self.radius - ASTEROID_MIN_RADIUS  # T3.5: Ex: 60 - 20 = 40 (large becomes medium); 40 - 20 = 20 (medium becomes small)
-
-        first_asteroid = Asteroid(self.position.x, self.position.y, new_radius)  # T3.6: instantiate = create an object; joins its groups via Asteroid.containers
-        second_asteroid = Asteroid(self.position.x, self.position.y, new_radius)  # second one starts at the same spot
-
-        first_asteroid.velocity = first_velocity * 1.2  # T3.7: number x vector stretches its length; 1.2 = 20% faster. Ex: speed 60 becomes 72
-        second_asteroid.velocity = second_velocity * 1.2  # T3.8: same for the second one
+        first_asteroid = Asteroid(self.position.x, self.position.y, new_radius)  # instantiate = create an object; joins groups via containers
+        second_asteroid = Asteroid(self.position.x, self.position.y, new_radius)
+        first_asteroid.velocity = first_velocity * 1.2  # number x arrow stretches it: 20% faster
+        second_asteroid.velocity = second_velocity * 1.2

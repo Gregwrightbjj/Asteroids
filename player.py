@@ -1,63 +1,149 @@
-import pygame  # needed for Vector2, draw.polygon, and key.get_pressed; each file needs its own imports
-from constants import (  # parentheses let one import span several lines
+import pygame
+from constants import (
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
     PLAYER_RADIUS,
     LINE_WIDTH,
     PLAYER_TURN_SPEED,
-    PLAYER_SPEED,
-    PLAYER_SHOOT_SPEED,
-    PLAYER_SHOOT_COOLDOWN_SECONDS,  # T2: "import it into player.py"; shoot() uses it
+    PLAYER_ACCELERATION,
+    PLAYER_DRAG,
+    PLAYER_MAX_SPEED,
+    PLAYER_RESPAWN_INVULNERABLE_SECONDS,
+    SHIELD_DURATION_SECONDS,
+    SPEED_BOOST_DURATION_SECONDS,
+    SPEED_BOOST_MULTIPLIER,
+    WEAPONS,
+    BOMB_START_COUNT,
 )
-from circleshape import CircleShape  # a class can only inherit from a parent it can see
-from shot import Shot  # shoot() creates Shot objects
+from circleshape import CircleShape  # parent class
+from shot import Shot  # shoot() creates bullets
+from bomb import Bomb  # drop_bomb() creates bombs
 
 
-class Player(CircleShape):  # class = blueprint for objects; (CircleShape) = inherit the parent's attributes/methods
-    def __init__(self, x, y):  # constructor (__init__) runs when a Player is created; self = this object
-        super().__init__(x, y, PLAYER_RADIUS)  # super() = parent class; runs its setup (position, radius)
-        self.rotation = 0  # attribute = variable on an object; rotation = turn angle in degrees
-        self.shoot_timer = 0  # T1: seconds left before the ship may fire again; 0 = ready (so the first shot is allowed)
+# ---------- triangle collision helpers ----------
+def point_segment_distance(p, a, b):  # shortest distance from point p to the line segment a-b
+    ab = b - a  # the edge as an arrow
+    length_sq = ab.length_squared()  # edge length squared
+    if length_sq == 0:  # degenerate edge: a and b are the same point
+        return p.distance_to(a)
+    t = (p - a).dot(ab) / length_sq  # dot product: how far along the edge p's "shadow" falls (0 = at a, 1 = at b)
+    t = max(0, min(1, t))  # clamp so the closest spot stays on the segment
+    return p.distance_to(a + ab * t)  # distance to that closest spot
 
-    def triangle(self) -> list[pygame.Vector2]:  # returns the ship's 3 corners (-> = return type hint)
-        forward = pygame.Vector2(0, 1).rotate(self.rotation)  # Vector2 = an arrow/point stored as (x, y)
-        right = pygame.Vector2(0, 1).rotate(self.rotation + 90) * self.radius / 1.5  # sideways arrow sets ship width
-        a = self.position + forward * self.radius  # tip of the ship
-        b = self.position - forward * self.radius - right  # back-left corner
-        c = self.position - forward * self.radius + right  # back-right corner
+
+def side(p1, p2, p3):  # the sign says which side of an edge a point is on
+    return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y)
+
+
+def point_in_triangle(p, a, b, c):  # inside = never on opposite sides of two edges
+    d1, d2, d3 = side(p, a, b), side(p, b, c), side(p, c, a)
+    has_negative = d1 < 0 or d2 < 0 or d3 < 0
+    has_positive = d1 > 0 or d2 > 0 or d3 > 0
+    return not (has_negative and has_positive)
+
+
+class Player(CircleShape):  # the ship; inherits position, velocity, radius, wrap
+    def __init__(self, x, y):
+        super().__init__(x, y, PLAYER_RADIUS)
+        self.rotation = 0  # turn angle in degrees
+        self.shoot_timer = 0  # seconds until the next shot is allowed (0 = ready)
+        self.invulnerable_timer = 0.0  # seconds of respawn protection left
+        self.shield_timer = 0.0  # seconds of shield left
+        self.speed_boost_timer = 0.0  # seconds of speed boost left
+        self.weapon = "single"  # key into the WEAPONS dictionary
+        self.bombs_left = BOMB_START_COUNT
+
+    def triangle(self) -> list[pygame.Vector2]:  # the ship's 3 corners (given by the lesson)
+        forward = pygame.Vector2(0, 1).rotate(self.rotation)
+        right = pygame.Vector2(0, 1).rotate(self.rotation + 90) * self.radius / 1.5
+        a = self.position + forward * self.radius  # tip
+        b = self.position - forward * self.radius - right  # back-left
+        c = self.position - forward * self.radius + right  # back-right
         return [a, b, c]
 
-    def draw(self, screen):  # override = same name as parent's draw, so this version is used instead
-        pygame.draw.polygon(screen, "white", self.triangle(), LINE_WIDTH)  # polygon = shape from points; width 2 = outline only
+    def draw(self, screen):
+        if self.shield_timer > 0:  # shield ring around the ship
+            pygame.draw.circle(screen, "cyan", self.position, self.radius + 6, LINE_WIDTH)
+        if self.invulnerable_timer > 0 and int(self.invulnerable_timer * 10) % 2 == 0:
+            return  # skip drawing every other tenth of a second = blinking
+        pygame.draw.polygon(screen, "white", self.triangle(), LINE_WIDTH)
 
-    def rotate(self, dt):  # method = function belonging to a class; dt = seconds since last frame
-        self.rotation += PLAYER_TURN_SPEED * dt  # += add and save back. Ex: 300 * 0.0167 = 5.01 degrees
+    def rotate(self, dt):
+        self.rotation += PLAYER_TURN_SPEED * dt  # degrees/second x seconds = degrees; -dt turns the other way
 
-    def move(self, dt):  # moves the ship a small step in the direction it faces
-        unit_vector = pygame.Vector2(0, 1)  # unit vector = arrow of length 1 (direction only); (0, 1) = down
-        rotated_vector = unit_vector.rotate(self.rotation)  # .rotate() returns a NEW vector, turned by rotation degrees
-        rotated_with_speed_vector = rotated_vector * PLAYER_SPEED * dt  # number x vector stretches its length. Ex: (0, 1) * 200 * 0.0167 = (0, 3.34)
-        self.position += rotated_with_speed_vector  # adds the step to the position; this is where the ship moves
+    def accelerate(self, dt):  # thrust: changes VELOCITY, not position
+        boost = SPEED_BOOST_MULTIPLIER if self.speed_boost_timer > 0 else 1  # A if condition else B
+        forward = pygame.Vector2(0, 1).rotate(self.rotation)  # direction the ship faces
+        self.velocity += forward * PLAYER_ACCELERATION * boost * dt  # push velocity that way
+        if self.velocity.length() > PLAYER_MAX_SPEED * boost:  # length() = current speed
+            self.velocity.scale_to_length(PLAYER_MAX_SPEED * boost)  # shrink to the cap, same direction
 
-    def shoot(self):  # takes no parameters besides self (the player firing)
-        if self.shoot_timer > 0:  # T3.1: timer above 0 = still cooling down. Ex: 0.2 > 0 is True
-            return  # return = end the method right now; skips every line below, so no bullet is made
+    def respawn(self):  # back to the center, still, and protected for a while
+        self.position = pygame.Vector2(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
+        self.velocity = pygame.Vector2(0, 0)  # stop drifting
+        self.rotation = 0
+        self.invulnerable_timer = PLAYER_RESPAWN_INVULNERABLE_SECONDS
 
-        self.shoot_timer = PLAYER_SHOOT_COOLDOWN_SECONDS  # T3.2: ready, so restart the cooldown at 0.3; makes the NEXT call hit the check above
+    def is_protected(self):  # one place to ask "can the ship be hurt right now?"
+        return self.invulnerable_timer > 0 or self.shield_timer > 0
 
-        shot = Shot(self.position.x, self.position.y)  # instantiate = create a Shot at the player's center; joins its groups automatically
-        shot.velocity = pygame.Vector2(0, 1).rotate(self.rotation) * PLAYER_SHOOT_SPEED  # same math as move(): turn (0, 1) to face forward, then scale it
+    def apply_powerup(self, kind):  # sets the matching timer
+        if kind == "shield":
+            self.shield_timer = SHIELD_DURATION_SECONDS
+        elif kind == "speed":
+            self.speed_boost_timer = SPEED_BOOST_DURATION_SECONDS
 
-    def update(self, dt: float) -> None:  # runs once per frame; float = decimal number; -> None = returns nothing
-        self.shoot_timer -= dt  # T4: -= subtract and save back; counts the timer down in real time. Ex: 0.3 - 0.0167 = 0.2833. It may dip below 0, which is fine because shoot() only checks "> 0"
+    def collides_with(self, other):  # override: triangle vs circle instead of circle vs circle
+        a, b, c = self.triangle()  # the ship's corners
+        center = other.position
+        if point_in_triangle(center, a, b, c):  # the other circle's center is inside the ship
+            return True
+        for start, end in ((a, b), (b, c), (c, a)):  # the three edges
+            if point_segment_distance(center, start, end) <= other.radius:  # circle touches an edge
+                return True
+        return False
 
-        keys = pygame.key.get_pressed()  # asks pygame which keys are held down right now
+    def shoot(self):
+        if self.shoot_timer > 0:  # still cooling down
+            return  # end the method now; no bullet
+        weapon = WEAPONS[self.weapon]  # this weapon's settings (a dictionary)
+        self.shoot_timer = weapon["cooldown"]  # restart the cooldown
+        for angle in weapon["angles"]:  # one bullet per angle
+            shot = Shot(self.position.x, self.position.y, weapon["radius"], weapon["pierce"])
+            shot.velocity = pygame.Vector2(0, 1).rotate(self.rotation + angle) * weapon["speed"]  # facing + angle, scaled by speed
 
-        if keys[pygame.K_a]:  # K_a = pygame's name for the A key; True while held
-            self.rotate(-dt)  # minus reverses dt: turn left
-        if keys[pygame.K_d]:
+    def drop_bomb(self):
+        if self.bombs_left <= 0:  # none left
+            return
+        self.bombs_left -= 1
+        Bomb(self.position.x, self.position.y)  # joins its groups automatically via Bomb.containers
+
+    def update(self, dt: float) -> None:  # runs once per frame
+        self.shoot_timer -= dt  # timers count down in real time (they may dip below 0; that's fine)
+        self.invulnerable_timer -= dt
+        self.shield_timer -= dt
+        self.speed_boost_timer -= dt
+
+        keys = pygame.key.get_pressed()  # which keys are held right now (polling)
+        if keys[pygame.K_LEFT]:  # K_LEFT = pygame's name for the left arrow
+            self.rotate(-dt)  # turn left
+        if keys[pygame.K_RIGHT]:
             self.rotate(dt)  # turn right
-        if keys[pygame.K_w]:  # each `if` is checked separately, so W + A together turns AND moves
-            self.move(dt)  # forward
-        if keys[pygame.K_s]:
-            self.move(-dt)  # negated dt = backward
-        if keys[pygame.K_SPACE]:  # held space still calls shoot() every frame, but shoot() now refuses during the cooldown
-            self.shoot()
+        if keys[pygame.K_UP]:
+            self.accelerate(dt)  # thrust forward
+        if keys[pygame.K_DOWN]:
+            self.accelerate(-dt)  # negated dt = reverse thrust
+        if keys[pygame.K_1]:
+            self.weapon = "single"
+        if keys[pygame.K_2]:
+            self.weapon = "spread"
+        if keys[pygame.K_3]:
+            self.weapon = "rapid"
+        if keys[pygame.K_4]:
+            self.weapon = "heavy"
+        if keys[pygame.K_SPACE]:
+            self.shoot()  # the cooldown limits how often it fires
+
+        self.velocity = self.velocity * max(0.0, 1 - PLAYER_DRAG * dt)  # drag; max() stops the factor going negative
+        self.position += self.velocity * dt  # drift happens even with no keys held
+        self.wrap()  # leaving one side = reappearing on the other
