@@ -169,7 +169,7 @@ the controls; press **Enter** when ready. No asteroids spawn until you start.
 | H | Pause and show / hide controls during play |
 | M | Mute / unmute both music and sound effects |
 | - / + | Lower / raise master volume by ten percentage points; = and keypad +/- also work |
-| Enter | Start, or resume from the help screen |
+| Enter | Start, resume from help, or begin a fresh round after game over |
 | Esc | Quit from any screen |
 
 You can select any weapon immediately; weapons do not need unlocking.
@@ -186,10 +186,21 @@ window when it leaves a screen edge.
 by the start screen and the paused help screen. Fonts are created once in
 `main.py`. The HUD's **H: controls / pause** hint keeps help discoverable.
 
-`main.py` uses two yes/no values (booleans): `started` begins as `False`, and `showing_help`
-toggles with H after starting. Enter starts or resumes. Events are still
+`main.py` uses three yes/no values (booleans): `started` begins as `False`,
+`showing_help` toggles with H during a live round, and `game_over` becomes
+True after the last life is lost. Enter starts, resumes, or resets a finished
+round according to those values. Events are still
 read on every frame, so closing the window and pressing Esc always work.
 Bomb input is accepted only during play.
+
+After the last life, `draw_game_over()` shows the final score over the frozen
+world and explains Enter to play again or Esc to quit. H and B are ignored
+on this panel. Enter calls `reset_game()`, which removes old objects from all
+their groups and creates a new ship and invisible rock creator. Main resets
+score to zero, lives to the starting count, `game_over` to False, help closed,
+and dt to zero. A new ship restores its starting weapon, bombs, position,
+velocity, angle, and timers. This is a new round in the same running program;
+it does not recreate the window, regenerate music, or reset audio preferences.
 
 Music and audio controls are separate from gameplay updates. The background
 loop continues on the start/help screens; M and the volume keys work there
@@ -319,7 +330,7 @@ file = what that object is and does, `main.py` = how objects interact.
 
 | File | Main names defined there | Job and connection to the rest of the game |
 | --- | --- | --- |
-| [main.py](main.py) | `main` | Creates collections and objects, handles one-time input, runs updates, coordinates contact/damage/scoring, and draws each frame. |
+| [main.py](main.py) | `reset_game`, `main` | Creates collections, resets rounds, handles input, runs updates, coordinates contact/damage/scoring, and draws each frame. |
 | [constants.py](constants.py) | `SCREEN_WIDTH`, `WEAPONS`, and other settings | Supplies shared values. It does not open a window or create game objects. |
 | [circleshape.py](circleshape.py) | `CircleShape` | Supplies shared position, movement values, size, group setup, circle contact checks, and reappearance across screen edges. Its default `draw` and `update` do nothing. |
 | [player.py](player.py) | `Player`, `point_segment_distance`, `side`, `point_in_triangle` | Handles held keys, ship motion, triangular contact checks, weapons, bomb creation, bonus effects, and returning after losing a life. |
@@ -330,7 +341,7 @@ file = what that object is and does, `main.py` = how objects interact.
 | [powerup.py](powerup.py) | `PowerUp` | Moves, colors, and expires collectible shield/speed items. `main.py` detects collection; `Player.apply_powerup` gives the bonus. |
 | [particle.py](particle.py) | `Particle`, `spawn_explosion` | Creates, moves, fades, and removes the tiny dots that make explosions visible. These dots cause no damage. |
 | [background.py](background.py) | `make_starfield`, `load_background` | Creates the star image used by the game. The alternative image-loading function exists but is not called by `main.py`. |
-| [controls.py](controls.py) | `CONTROLS`, `draw_controls` | Stores instruction rows and draws the start/help panel. It does not decide when play is paused; `main.py` does. |
+| [controls.py](controls.py) | `CONTROLS`, `draw_controls`, `draw_game_over` | Stores instruction rows and draws start/help and final-score panels. Main decides which screen is open and whether gameplay runs. |
 | [logger.py](logger.py) | `SpriteInfo`, `GroupInfo`, `log_state`, `log_event` | Describes and saves records for inspecting gameplay. It does not control ship movement or decide collisions. |
 | [sounds.py](sounds.py) | `EFFECTS`, `make_sound`, `make_music`, `SoundEffects` | Synthesizes original music/effects once and manages playback, mute, and shared volume. Main passes this manager to the ship. |
 
@@ -578,7 +589,8 @@ destroyed by hitting the ship gives no points.
 ### 6.4 Lives, respawning, and protection
 
 **Mechanism:** `lives` is a variable in `main()`. When the ship is hit:
-lives drop by one; if that reaches 0 the game ends; otherwise
+lives drop by one; at zero the round ends and the final-score panel opens;
+otherwise
 `player.respawn()` resets the ship to the center with zero velocity and
 starts the invulnerability timer.
 
@@ -590,7 +602,9 @@ immediate further loss of life while it gets moving again.
 
 **Why `continue`:** after the player-hit branch, the asteroid is dead. The
 `continue` skips the bullet checks so a destroyed asteroid isn't tested
-again.
+again. On the final life, the code instead sets `game_over`, removes the
+ship, and uses `break` to stop checking more rocks. Main then continues to
+the menu branch so no more gameplay is processed after that round ends.
 
 **`is_protected()`:** answers "is this ship protected right now?" It returns
 True while either the respawn timer or
@@ -1598,9 +1612,10 @@ change continually. Main only needs to copy the already-finished image.
 **Open the source:** [controls.py](controls.py). [Back to contents](#contents).
 
 **Its job and why it exists.** This file draws one reusable instruction
-panel for two situations: before the game starts and while the player has
-paused to read help. Reusing it keeps both screens' key descriptions
-consistent. Main controls the timing and input; this file controls the picture.
+panel for the start and paused-help screens, plus a separate final-score
+panel after game over. Reusing the instruction panel keeps those two
+screens' key descriptions consistent. Main controls timing, input, and
+round reset; this file controls the pictures.
 
 **What it brings in.** Only Pygame. It needs Surfaces for image layers,
 Rects for positioning, and rectangle drawing. The window and already-created
@@ -1619,6 +1634,7 @@ exist while drawing; they are not saved game progress.
 | --- | --- | --- |
 | `draw_controls(screen, title_font, text_font, paused=False)` | Makes a partly see-through black layer, draws the centered panel and border, selects the heading, draws each key/action row and the explanatory messages. | Changes the supplied screen image and returns no result. `paused` selects wording; it does not stop updates by itself. |
 | Inner `centered(text, font, y, color="white")` | Renders the supplied message to a small image, gets a rectangle centered at the panel's middle and height y, then copies the image to screen. | A local drawing helper used only during the outer call. It avoids repeating the same centering calculation for each message. |
+| `draw_game_over(screen, title_font, text_font, score)` | Darkens the frozen scene and draws a centered GAME OVER panel with the supplied score and Enter/Esc instructions. | Draws the result but does not remove old objects or start another round; main performs those actions after the appropriate input. |
 
 The inner helper is defined after the panel is created and before it is
 called. It can read that outer call's `screen` and `panel`, so those do not
@@ -1724,12 +1740,12 @@ the object files smaller while giving the whole game one explicit order.
 
 | Imported names | What main needs them for |
 | --- | --- |
-| `random`, `sys`, `pygame` | Decide whether to create bonus items, exit on the last lost life, and use window/input/time/font/group tools. |
+| `random`, `pygame` | Decide whether to create bonus items and use window/input/time/font/group/audio tools. Losing the last life now opens a panel rather than exiting through sys. |
 | `SCREEN_WIDTH`, `SCREEN_HEIGHT`, `PLAYER_LIVES`, `HUD_FONT_SIZE`, `POWERUP_DROP_CHANCE`, `BOMB_BLAST_RADIUS` | Configure window/setup values and the cross-object rules main applies. |
 | `log_state`, `log_event` from `logger.py` | Record occasional state and named hits. |
 | `Player`, `Asteroid`, `AsteroidField`, `Shot`, `Particle`, `PowerUp`, `Bomb` from their respective files | Assign each blueprint's groups and create the initial ship/creator; main also creates random bonus items. Individual bullets, fragments, and bombs are created by their relevant object functions. |
 | `spawn_explosion` from `particle.py` | Make visible effects for bomb damage. Rock splitting calls the same helper from the rock file. |
-| `make_starfield` from `background.py`, `draw_controls` from `controls.py` | Prepare the background and draw the shared start/help panel. |
+| `make_starfield` from `background.py`, `draw_controls`, `draw_game_over` from `controls.py` | Prepare the background and draw the correct instructions or final-score panel. |
 | `SoundEffects` from `sounds.py` | Build the music/effects manager once, use it for audio controls and main-handled events, and pass it to the ship for firing/drop sounds. |
 
 **What it stores.** `clock` measures/limits frame time, `dt` is elapsed
@@ -1739,21 +1755,32 @@ to the shared audio manager, which owns mute, volume, cached audio, and
 playback channels. Six groups
 organize the objects: `updatable`, `drawable`, `asteroids`, `shots`,
 `powerups`, and `bombs`. `player` and `asteroid_field` refer to the two
-initial objects. `score`, `lives`, `started`, and `showing_help` describe
+objects for the current round. `score`, `lives`, `started`, `showing_help`, and `game_over` describe
 overall progress and menu state. Temporary names inside loops refer to the
 object or message currently being processed, not separate saved game systems.
 
-**Functions and execution in source order.** There is one function,
-`main()`, with no arguments. Its body performs these phases:
+**Functions and execution in source order.** `reset_game(updatable, sounds)`
+comes first. It loops through the old update-group members and calls
+`kill()` on each, removing them from every group they joined. It then
+creates a centered `Player` using the existing sound manager and a new
+`AsteroidField` with a fresh creation timer, returning both references.
+Using only `updatable.empty()` would be insufficient: it would leave the
+old objects in their drawing and interaction groups. Every game object in
+this project's setup joins `updatable`, so killing its members clears the world.
+
+`main()`, which has no arguments, creates the window/audio once and uses
+that reset function for the first round and each Enter restart. Score,
+lives, and menu flags belong to main, so it resets those separately.
+Its body performs these phases:
 
 | Phase inside `main()` | Work performed | Why this position in the code matters |
 | --- | --- | --- |
 | Print and initialize | Report Pygame/version/window settings, initialize Pygame, create clock/window/title. | Display and font work must have their required systems ready. |
 | Prepare drawing resources | Create the star image and fonts. | These are reused instead of repeatedly recreated during gameplay. |
 | Create collections and assign `containers` | Make empty groups, then tell each class which ones its new objects join. | Assignment must precede the initial ship/creator and later object creation. |
-| Create initial objects and overall values | Make ship and invisible creator; initialize score, lives, and menu flags. | These should not reset on every frame. |
+| Create initial objects and overall values | Call reset_game for ship/creator and initialize score, lives, and menu flags. | The same reset helper is reused after game over; ordinary frames do not recreate the ship. |
 | Start the repeating loop and read events | Accept close, Esc, Enter, H, B, M, and volume keys under their stated conditions. | Menu/quit/audio controls still work while paused; B calls the ship only during active play. |
-| Handle start/help screen | Draw the appropriate panel, present it, cap redraw speed, set dt to zero, and continue. | Skipping everything below this branch pauses movement and game timers. |
+| Handle start/help/game-over screen | Draw the appropriate panel, present it, cap redraw speed, set dt to zero, and continue. | Skipping everything below this branch freezes movement and timers; Enter after game over resets the round before resuming. |
 | Log and update | Save occasional state, then call `updatable.update(dt)`. | Object positions and countdowns change before main uses them for this frame's interactions. |
 | Apply bomb explosions | For each detonated bomb, score/remove overlapping rocks and create visual effects, then remove the bomb. | Those removed rocks do not appear in the later fresh rock-contact pass. |
 | Collect bonus items | Check ship triangle against item circles, apply the matching ship timer, then remove each collected item. | A collected shield can protect the ship during the later rock checks in this frame. |
@@ -1761,14 +1788,14 @@ object or message currently being processed, not separate saved game systems.
 | Draw the completed scene | Copy background, draw visible objects, render status text and help hint, then present the display. | Later pictures cover earlier ones, keeping text in front and erasing old positions. |
 | Measure and cap time | `clock.tick(60) / 1000` waits if necessary and converts elapsed milliseconds to seconds for the next update. | Motion/timers use elapsed seconds, rather than moving a fixed amount per loop pass. |
 
-After the function definition, the `if __name__ == "__main__"` guard calls
-it only when this file is launched directly. A window-close or Esc request
-returns out of main; the final lost life lets the 0.3-second damage sound
-finish when audio is enabled and unmuted, then uses `sys.exit()`. Nothing here
-loops back to a restart screen after game over.
+After the function definitions, the `if __name__ == "__main__"` guard calls
+main only when this file is launched directly. A window-close or Esc request
+returns out of main. Losing the final life keeps the program running on the
+score panel, allowing the damage sound to finish without a blocking wait.
+Enter creates a fresh round while keeping the same audio manager and window.
 
 ```text
-events read -> start/help open? -> yes -> draw instructions -> next loop pass
+events read -> start/help/game over? -> yes -> draw panel -> next loop pass
                          |
                          no
                          v
@@ -1867,7 +1894,7 @@ It evokes old electronic arcade music without copying a game's melody.
 | Successful bomb drop | `Player.drop_bomb` after creating it | An empty bomb supply returns before playing confirmation. |
 | Bullet destroys a rock | Main's bullet-hit branch | That branch knows an actual hit occurred; simply drawing a nearby bullet should make no impact sound. |
 | Bomb explosion | Main's detonated-bomb branch | One blast per bomb, even if many rocks are destroyed. |
-| Ship loses a life | Main's unprotected ship-hit branch | Protected contact makes no false damage warning. The final hit has a short sound-completion wait before exit. |
+| Ship loses a life | Main's unprotected ship-hit branch | Protected contact makes no false damage warning. The final hit can finish while the final-score panel is open, without delaying the event loop. |
 | Collected shield/speed item | Main's item-contact branch | The saved item kind selects the corresponding rising tone only when collected. |
 | Music | Sound-manager setup and leaving mute | Playback is not tied to sprite updates, so it continues during menu/help screens. |
 
@@ -1910,7 +1937,7 @@ its name. These are not copies kept automatically in sync across files.
 | --- | --- | --- | --- |
 | Shared settings | Names in `constants.py` | Defined at module load; edited between runs when tuning | Importing files read the settings they use. Capital letters express intent, not enforced immutability. |
 | `score`, `lives` | Local variables in `main()` | Main's hit/explosion code | Main draws them; zero lives ends the game. The ship does not hold a second lives value. |
-| `started`, `showing_help`, `dt` | Local variables in `main()` | Main's event/menu/timing code | Main chooses branches and passes dt to object updates. |
+| `started`, `showing_help`, `game_over`, `dt` | Local variables in `main()` | Main's event/menu/timing code | Main chooses the start/help/game-over/live branch, resets finished rounds, and passes dt to updates. |
 | `containers` | Assigned on object classes in main | Main during setup | New-object setup reads it to join groups. It is not a bag of copied objects. |
 | `position`, `velocity`, `radius` | Each object's own stored values | Shared setup creates them; relevant motion/creation methods change them | Drawing/contact/movement functions read them; each object has its own position. |
 | Ship `rotation`, `weapon`, `bombs_left` | The Player instance | Ship turning/key/drop methods and setup; respawn resets rotation only | Ship geometry, firing, bomb checks, and main's status text read them. |
@@ -2084,8 +2111,9 @@ that rock. If the ship is unprotected and touches it, it records
 `"player_hit"`, subtracts one life, and splits the rock. This branch does
 not add score or create a random collectible item.
 
-If lives reach zero, the terminal prints `Game over!` and the program exits.
-There is no game-over panel or restart button in the current implementation.
+If lives reach zero, the terminal prints `Game over!` and the final-score
+panel opens. The ship is removed, the current rock-checking loop stops, and
+gameplay stays frozen. Enter creates a new round; Esc closes the program.
 If a life remains, `Player.respawn()` resets only these values:
 
 | Value | After `respawn()` |
@@ -2098,7 +2126,11 @@ If a life remains, `Player.respawn()` resets only these values:
 It does not reset the score, selected weapon, remaining bombs, shield timer,
 or speed-bonus timer. Existing rocks and bullets remain in the game.
 Those results follow from which assignments are actually present in
-`respawn()`, not from what other Asteroids games might do.
+`respawn()`, not from what other Asteroids games might do. This partial reset
+after losing one life differs from `reset_game()` after losing the entire
+round: restarting removes the old world and creates a brand-new ship,
+restoring weapon, bombs, and bonus timers too. Main also resets score/lives.
+Audio preferences and the running music manager are kept across rounds.
 
 ### 13.6 Opening help and resuming
 
@@ -2184,6 +2216,12 @@ errors are not caught here; for example, a file-permission error could stop
 the game with a traceback. The logger is separate from the visual effects
 and does not grant points or decide damage.
 
+Restarting a round with Enter does not reload this module or reset its
+diagnostic counters, flags, or initial clock time. The logs belong to the
+running program and can span several rounds; round state such as score,
+lives, and objects is reset separately. Relaunching the process initializes
+the logging module again.
+
 <a id="current-limits" name="current-limits"></a>
 
 ## 15. Current behavior and limits
@@ -2213,8 +2251,10 @@ claims have been implemented.
 - **Bombs, bonuses, and lives have different creation rules.** You start with
   three bombs and cannot replenish them in this code. Only bullet hits run
   the random collectible-creation check. There are no extra-life items.
-- **There is no restart, save/load, or enemy ship here.** Losing
-  the final life exits; running `uv run main.py` again starts a new game.
+- **Restart resets the round, not the application.** Enter after game over
+  clears the old world and starts from zero score and full lives, bombs,
+  and default ship settings. Mute/volume and diagnostic logging remain
+  associated with the running process. There is still no save/load or enemy ship.
 - **Some settings are older course leftovers.** `PLAYER_SPEED`,
   `PLAYER_SHOOT_SPEED`, and `PLAYER_SHOOT_COOLDOWN_SECONDS` are defined but
   do not drive the current motion or weapons. Changing them alone will not

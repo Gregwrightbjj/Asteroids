@@ -39,3 +39,19 @@ def draw_controls(screen, title_font, text_font, paused=False):  # define the fu
     centered("Your ship drifts and wraps around the screen edges.", text_font, panel.top + 520)  # explain that the ship keeps moving after thrust is released and reappears on the opposite side when it leaves a screen edge
     centered("Press Enter or H to resume" if paused else "Press Enter to play",  # choose the bottom instruction based on paused: Enter starts a new game, while Enter or H returns from the paused help panel
              text_font, panel.top + 565, "cyan")  # finish the centered(...) call from the previous line, using the smaller font and cyan text 565 pixels below the panel's top edge
+
+
+def draw_game_over(screen, title_font, text_font, score):  # draw the end-of-round panel using the final score passed by main; this function changes pixels, while main handles restart input and object reset
+    shade = pygame.Surface(screen.get_size(), pygame.SRCALPHA)  # create a partly transparent full-window layer so the frozen world remains faintly visible behind the score panel
+    shade.fill((0, 0, 0, 190))  # darken the background with black at opacity 190 out of 255, making the final score easy to read
+    screen.blit(shade, (0, 0))  # place the dark layer over the already-drawn frozen objects before drawing the panel itself
+    panel = pygame.Rect(0, 0, 680, 340)  # describe a compact rectangle large enough for the title, final score, and restart/quit instructions
+    panel.center = screen.get_rect().center  # move that panel to the exact center of the game window
+    pygame.draw.rect(screen, (12, 20, 35), panel, border_radius=16)  # draw the same dark-blue rounded style used by the start/help screen
+    pygame.draw.rect(screen, "cyan", panel, width=2, border_radius=16)  # outline the panel with a two-pixel cyan border so it stands out from the scene behind it
+    title = title_font.render("GAME OVER", True, "white")  # make a large text image announcing that this round has ended
+    screen.blit(title, title.get_rect(center=(panel.centerx, panel.top + 65)))  # center the heading near the top of the panel
+    messages = (f"Final score: {score}", "Press Enter to play again", "Press Esc to quit")  # store the final points total and the two available end-of-round actions in display order
+    for index, message in enumerate(messages):  # visit each line with its zero-based row number so the same positioning calculation can space all three
+        text = text_font.render(message, True, "cyan" if index == 0 else "white")  # highlight the score in cyan while leaving the restart and quit instructions white
+        screen.blit(text, text.get_rect(center=(panel.centerx, panel.top + 145 + index * 65)))  # place the centered score/instruction lines sixty-five pixels apart inside the panel

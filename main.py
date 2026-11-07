@@ -1,5 +1,4 @@
 import random  # bring in Python's random-number tools; this file uses them to decide whether a destroyed rock leaves a bonus item and which bonus it gives
-import sys  # load Python's system tools so sys.exit() can stop the program when the player loses their last life
 import pygame  # load Pygame, the library that creates the game window, reads keys, draws shapes, and manages groups of game objects
 from constants import (  # import the named settings below from constants.py; parentheses allow this one import statement to span several lines
     SCREEN_WIDTH,  # bring in the window width from constants.py; set_mode below reads this number when it opens the window, and pixels are the tiny dots used to measure screen distances
@@ -18,11 +17,19 @@ from particle import Particle, spawn_explosion  # look in particle.py and bring 
 from powerup import PowerUp  # look in powerup.py and bring in the PowerUp class, a blueprint for cyan shield items and yellow speed items; touching one gives the ship its bonus
 from bomb import Bomb  # look in bomb.py and bring in the Bomb class, a blueprint for a bomb; main.py checks when its countdown finishes and destroys nearby rocks
 from background import make_starfield  # look in background.py and bring in the make_starfield function; calling it builds the black image with stars that will be drawn behind the game
-from controls import draw_controls  # look in controls.py and bring in the draw_controls function; calling it draws the keyboard instructions on the start screen or the paused help screen
+from controls import draw_controls, draw_game_over  # look in controls.py and bring in the functions that draw keyboard instructions and the final-score/restart panel
 from sounds import SoundEffects  # look in sounds.py and bring in the manager that generates arcade effects and music, remembers volume/mute, and plays named events without stopping the game loop
 
 
-def main():  # define the main game function; its setup runs once, then its while loop handles the game repeatedly until the player exits
+def reset_game(updatable, sounds):  # prepare a fresh round using the existing groups and audio manager, so restarting does not recreate the window or reset volume
+    for obj in updatable:  # visit every old game object, including the invisible rock creator, before creating the next round's objects
+        obj.kill()  # remove this object from all its groups, clearing old rocks, bullets, bombs, bonuses, effects, and the previous ship
+    player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, sounds=sounds)  # create a new centered ship with its normal weapon, full bomb supply, zero velocity, and no leftover bonus timers
+    asteroid_field = AsteroidField()  # create a new invisible rock producer with its timer at zero, preventing the old round's spawn timing from carrying over
+    return player, asteroid_field  # give main references to the new ship and creator; the caller separately resets score, lives, and screen-state flags
+
+
+def main():  # define the main game function; window/audio setup runs once, then the loop can play multiple rounds until the user exits
     print(f"Starting Asteroids with pygame version: {pygame.version.ver}")  # print the installed Pygame version in the terminal; the f prefix replaces the expression inside braces with its current value
     print(f"Screen width: {SCREEN_WIDTH}")  # print the configured window width in the terminal; {SCREEN_WIDTH} inserts that setting's numeric value into the text
     print(f"Screen height: {SCREEN_HEIGHT}")  # print the configured window height in the terminal; {SCREEN_HEIGHT} inserts that setting's numeric value into the text
@@ -54,15 +61,15 @@ def main():  # define the main game function; its setup runs once, then its whil
     PowerUp.containers = (powerups, updatable, drawable)  # tell collectible shield/speed items to join their own collection, update their position/lifetime, and appear on screen
     Bomb.containers = (bombs, updatable, drawable)  # tell dropped bombs to join their own collection, update their countdown, and draw their flashing shape
 
-    player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, sounds=sounds)  # create the centered ship and give it the sound manager so successful shots and bomb drops can be heard
-    asteroid_field = AsteroidField()  # create the invisible object that produces rocks; its setup adds it to updatable, so the game calls its update function along with the visible objects
+    player, asteroid_field = reset_game(updatable, sounds)  # create the first round using the same setup function that Enter will later use after game over
 
     score = 0  # start the player's total points at zero; main() owns this value because bullets and bombs can both increase it
     lives = PLAYER_LIVES  # copy the starting number of lives from the settings; losing a life changes this local value without changing the setting
     started = False  # store whether Enter has started the game; False means no, so the instruction screen is shown and game objects do not advance
     showing_help = False  # store whether the controls panel is open; False means closed, and setting it to True pauses game updates while instructions are visible
+    game_over = False  # remember whether the final life was lost; True freezes the world and shows the final score until Enter begins a fresh round
 
-    while True:  # repeat this indented game loop indefinitely; one pass prepares one frame, and return or sys.exit() ends the game
+    while True:  # repeat this game loop for menus and active rounds; only the close button or Esc leaves main, while losing all lives changes the displayed screen
         for event in pygame.event.get():  # collect pending window/keyboard events and handle each once; get() removes them from the queue, so use only one event-reading loop per frame
             if event.type == pygame.QUIT:  # check whether the user clicked the window's close button; QUIT is Pygame's name for that close request
                 return  # leave main() immediately, ending the game loop and closing the program after this close-button or Esc request
@@ -75,26 +82,35 @@ def main():  # define the main game function; its setup runs once, then its whil
                     sounds.change_volume(-0.1)  # reduce master volume by ten percentage points, keeping it in the zero-to-one range
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):  # accept the equals/plus key or keypad plus so increasing volume does not require a particular Shift-key layout
                     sounds.change_volume(0.1)  # increase master volume by ten percentage points; if muted, remember the new level without unmuting
-                elif event.key == pygame.K_RETURN:  # check whether Enter was pressed; RETURN is Pygame's name for Enter, which starts the game or resumes from help
+                elif event.key == pygame.K_RETURN:  # Enter starts play, resumes help, or resets the round when the final-score screen is open
+                    if game_over:  # reset only after the last life is lost, so pressing Enter during ordinary gameplay cannot erase the current score
+                        player, asteroid_field = reset_game(updatable, sounds)  # remove every old object and create a new ship and rock producer using the existing groups and audio settings
+                        score = 0  # begin the new round with no points, rather than carrying over the previous final score
+                        lives = PLAYER_LIVES  # restore all starting lives for the fresh round
+                        game_over = False  # close the final-score panel so normal gameplay can run again
+                        dt = 0.0  # prevent the time spent on the final-score screen from moving the newly created ship or advancing its timers
                     started = True  # mark the game as started so the next frames can update movement, create asteroids, and check collisions
                     showing_help = False  # close the instructions after Enter is pressed; the game can now reach the movement and collision code below
-                elif event.key == pygame.K_h and started:  # otherwise check for H, but accept it only after the game has started; and requires both conditions to be true
+                elif event.key == pygame.K_h and started and not game_over:  # allow help during a live round, but keep H from replacing the final-score panel
                     showing_help = not showing_help  # reverse the help setting: not False becomes True to pause/show instructions, and not True becomes False to resume play
-                elif event.key == pygame.K_b and started and not showing_help:  # otherwise accept B only if play has started and help is closed, preventing bombs from being spent while reading instructions
+                elif event.key == pygame.K_b and started and not showing_help and not game_over:  # accept bombs only during active play, preventing drops on start, help, or final-score screens
                     player.drop_bomb()  # call the ship's drop_bomb method; it checks the remaining supply, spends one bomb, and creates it at the ship's current position
 
-        if not started or showing_help:  # enter the instruction-screen branch if play has not begun OR the player has opened help; either condition is enough
+        if not started or showing_help or game_over:  # draw a menu instead of advancing gameplay before starting, while reading help, or after the last life is lost
             screen.blit(background, (0, 0))  # copy the background image onto the screen starting at its top-left corner (0, 0), painting over the previous frame
             if started:  # draw the frozen game objects behind the help panel only if gameplay has already started; the initial start screen shows just the background
                 for obj in drawable:  # go through the objects that should be visible; obj refers to one ship, rock, bullet, or other object at a time
                     obj.draw(screen)  # call the current object's own drawing method, so each type draws its correct shape onto the same screen
-            draw_controls(screen, title_font, help_font, paused=started)  # draw instructions using the two fonts; paused=started tells the function whether to show the start message or the paused/resume message
+            if game_over:  # choose the final-score panel when no lives remain, keeping the old world frozen behind it
+                draw_game_over(screen, title_font, help_font, score)  # display the completed round's score and explain how to restart or quit
+            else:  # use the usual keyboard guide before play or while the player has paused a live round
+                draw_controls(screen, title_font, help_font, paused=started)  # choose start/resume wording using the same existing instruction-panel function
             audio_label = help_font.render(sounds.status_text(), True, "white")  # turn the current audio setting into text so volume and mute changes are visible even before playing
             screen.blit(audio_label, (SCREEN_WIDTH - audio_label.get_width() - 15, 15))  # place audio status above the instruction panel near the window's top-right corner
             pygame.display.flip()  # make the completed frame visible in the window after all its background, objects, and text have been drawn
             clock.tick(60)  # wait if needed so the start/help screen does not redraw more than roughly 60 times per second and waste processing power
             dt = 0.0  # set elapsed frame time to zero; before the first frame or after a menu pause, objects must not jump forward using old elapsed time
-            continue  # start the next game-loop pass without moving objects, creating rocks, changing timers, or checking collisions while instructions are open
+            continue  # skip movement, new rocks, countdowns, and contact checks while any menu is open, including the final-score screen
 
         log_state()  # ask the course logger to occasionally save the current objects and their positions to game_state.jsonl; this runs only during active play
 
@@ -123,11 +139,11 @@ def main():  # define the main game function; its setup runs once, then its whil
                 sounds.play("ship_hit")  # play the damage warning only when an unprotected collision actually removes a life
                 lives -= 1  # subtract one from the remaining lives; -= means subtract the value and save the result back into the same variable
                 asteroid.split()  # remove the hit rock and show its explosion; medium or large rocks also create two smaller rocks moving in different directions
-                if lives <= 0:  # check whether the ship has used its final life; <= includes both zero and any negative value
-                    print("Game over!")  # write Game over! in the terminal to explain why the game is about to close
-                    if sounds.enabled and not sounds.muted:  # allow the final damage sound to finish before ending the process, unless the player deliberately muted audio
-                        pygame.time.wait(300)  # wait for the short damage sound only after the final life is lost, without adding delay to ordinary gameplay
-                    sys.exit()  # end the Python program immediately because no lives remain
+                if lives <= 0:  # switch screens when the ship loses its final life instead of closing the program
+                    print("Game over!")  # record the end of the round in the terminal while the window stays open to show its score and restart option
+                    game_over = True  # remember that this round is finished so the next loop pass shows its final score and accepts restart input
+                    player.kill()  # remove the destroyed ship from the update/drawing groups while leaving the remaining world frozen behind the panel
+                    break  # stop checking more rocks immediately, preventing another hit or extra scoring after the round has ended
                 player.respawn()  # move the ship back to the center, stop its movement, reset its direction, and grant a short period of protection
                 continue  # start the next rock check because this rock was destroyed by hitting the ship; skip bullet checks against that removed rock
 
@@ -142,6 +158,10 @@ def main():  # define the main game function; its setup runs once, then its whil
                     if not shot.pierce:  # remove the bullet only if its pierce setting is False; heavy bullets set it to True and can keep traveling after hitting rocks
                         shot.kill()  # remove this ordinary bullet from every group because it has already hit a rock and should no longer move or be drawn
                     break  # leave the bullet-checking loop for this destroyed rock so no second bullet scores another hit against the same rock
+
+        if game_over:  # a final-life collision happened during this frame's rock loop
+            dt = 0.0  # discard the old movement duration before entering the frozen final-score screen or starting a replacement round
+            continue  # go straight to menu/event handling without running more gameplay or drawing the ordinary live-game HUD
 
         screen.blit(background, (0, 0))  # copy the background image onto the screen starting at its top-left corner (0, 0), painting over the previous frame
         for obj in drawable:  # go through the objects that should be visible; obj refers to one ship, rock, bullet, or other object at a time

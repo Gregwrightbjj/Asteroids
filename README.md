@@ -16,6 +16,11 @@ The game opens on a controls screen. Press **Enter** to play. During a game,
 press **H** to pause and show the controls; press **H** or **Enter** to resume.
 Movement, spawning, collisions, and timers stay frozen while help is open.
 
+When you lose the last life, the game stays open and shows your final score.
+Press **Enter** to play again or **Esc** to quit. A new round clears every old
+game object and resets score, lives, weapons, bombs, and bonus timers. Your
+music, mute, and volume settings stay as you left them.
+
 ## Controls
 
 | Key | Action |
@@ -31,7 +36,7 @@ Movement, spawning, collisions, and timers stay frozen while help is open.
 | H | Pause and show / hide controls |
 | M | Mute / unmute music and effects |
 | - / + | Lower / raise master volume by 10 percentage points |
-| Enter | Start the game or resume from help |
+| Enter | Start, resume from help, or play again after game over |
 | Esc | Quit |
 
 Touch a cyan bonus item to gain a shield, or a yellow bonus item to boost
@@ -51,7 +56,8 @@ press it again to restart the music and allow new effects. **-** lowers master
 volume and **+** raises it; the unshifted **=** key and keypad +/- also work.
 These keys work on the start screen, while paused, and during play. Changing
 volume while muted remembers the setting without unmuting. Music continues
-while reading paused help. Audio settings reset when the game restarts.
+while reading paused help or the final-score screen. Audio settings stay the
+same when Enter starts another round and reset only when the program is relaunched.
 
 If an audio device cannot be opened, the game continues silently and shows
 **Sound: unavailable** instead of preventing you from playing.
@@ -73,8 +79,9 @@ Python/Pygame/project-code reference, and a method for tracing problems.
 A suggested reading order and prediction exercises let you check your
 understanding against the code.
 
-The shared start/help screen is drawn in `controls.py`; `main.py` manages
-starting, pausing, and resuming. The guide explains both sides of that connection.
+The start/help and game-over panels are drawn in `controls.py`; `main.py`
+manages starting, pausing, resuming, and resetting rounds. The guide explains
+both sides of that connection.
 
 ## WSL display troubleshooting
 
