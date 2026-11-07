@@ -1,7 +1,8 @@
 # Asteroids
 
-A Python/Pygame Asteroids game with four weapons, bombs, power-ups, and
-three lives. Built from the Boot.dev Asteroids project.
+A Python/Pygame Asteroids game with four weapons, bombs, power-ups, three
+lives, and original synthesized arcade music and sound effects. Built from
+the Boot.dev Asteroids project.
 
 ## Run
 
@@ -28,6 +29,8 @@ Movement, spawning, collisions, and timers stay frozen while help is open.
 | 4 | Heavy piercing shot |
 | B | Drop a bomb (three per game, two-second fuse) |
 | H | Pause and show / hide controls |
+| M | Mute / unmute music and effects |
+| - / + | Lower / raise master volume by 10 percentage points |
 | Enter | Start the game or resume from help |
 | Esc | Quit |
 
@@ -36,10 +39,27 @@ speed. Each effect lasts five seconds after collection. The ship keeps
 drifting after you release thrust and reappears on the opposite side when
 it leaves the window.
 
+## Audio
+
+An original eight-second chiptune loop plays in the background, with distinct
+sounds for all four weapons, rock hits, bomb drops/blasts, ship damage, and
+collecting shield/speed items. The game synthesizes them in memory at startup;
+no downloaded music, sound files, or additional Python packages are needed.
+
+Music stays quieter than the action effects. **M** immediately mutes both;
+press it again to restart the music and allow new effects. **-** lowers master
+volume and **+** raises it; the unshifted **=** key and keypad +/- also work.
+These keys work on the start screen, while paused, and during play. Changing
+volume while muted remembers the setting without unmuting. Music continues
+while reading paused help. Audio settings reset when the game restarts.
+
+If an audio device cannot be opened, the game continues silently and shows
+**Sound: unavailable** instead of preventing you from playing.
+
 ## Study guide
 
 Read [asteroids_guide.md](asteroids_guide.md) for a beginner's explanation of
-the whole project. It starts with Python words and symbols, maps all 13
+the whole project. It starts with Python words and symbols, maps all 14
 Python files, gives each file its own detailed chapter, and follows actual
 calls from keyboard input through movement, bullet hits, bombs, bonuses,
 scoring, and drawing. Each file chapter covers its job and purpose, imports,
@@ -62,3 +82,9 @@ If the game runs but only shows a blank taskbar preview with
 `[WARN:COPY MODE]`, WSLg's display service may need restarting. Save your
 WSL work, run `wsl --shutdown` in **Windows PowerShell**, reopen Ubuntu,
 and run the game again.
+
+If graphics work but the game shows **Sound: unavailable**, Ubuntu also needs
+its native PulseAudio client library to reach WSLg's audio server. This machine
+was missing `libpulse0`; installing it restored Pygame playback. On another
+Ubuntu setup with the same missing-library error, install it with
+`sudo apt install libpulse0` and relaunch the game.

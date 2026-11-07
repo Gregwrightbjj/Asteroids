@@ -1,6 +1,6 @@
 # How Your Asteroids Game Works (and Why): Study Guide
 
-This guide explains the code in this project, including its 13 Python files,
+This guide explains the code in this project, including its 14 Python files,
 the start/help screens, and the connections between them. It describes the
 current implementation rather than an earlier version of the course project.
 You do not need to already know Python to start reading it.
@@ -77,6 +77,7 @@ Section 6's feature explanations are also linked individually here:
 | [11. controls.py](#chapter-controls) | The instruction text, panel layout, and drawing helper. |
 | [12. logger.py](#chapter-logger) | Saved records, Python's inspection tools, timing, and file-writing rules. |
 | [13. main.py](#chapter-main) | How all those parts are assembled and used in the correct order. |
+| [14. sounds.py](#chapter-sounds) | How original effects and background music are synthesized, played, muted, and controlled. |
 
 Reading the small bullet file before the larger ship file gives you a
 concrete example of an object before handling all the ship's additional
@@ -166,6 +167,8 @@ the controls; press **Enter** when ready. No asteroids spawn until you start.
 | 3 / 4 | Select rapid fire / heavy piercing shot |
 | B | Drop a bomb: three per game, two-second fuse |
 | H | Pause and show / hide controls during play |
+| M | Mute / unmute both music and sound effects |
+| - / + | Lower / raise master volume by ten percentage points; = and keypad +/- also work |
 | Enter | Start, or resume from the help screen |
 | Esc | Quit from any screen |
 
@@ -187,6 +190,12 @@ by the start screen and the paused help screen. Fonts are created once in
 toggles with H after starting. Enter starts or resumes. Events are still
 read on every frame, so closing the window and pressing Esc always work.
 Bomb input is accepted only during play.
+
+Music and audio controls are separate from gameplay updates. The background
+loop continues on the start/help screens; M and the volume keys work there
+too. Muting immediately stops music and effects, while unmuting restarts the
+music without replaying old impacts. The on-screen sound label shows volume,
+mute, or an unavailable device. Audio settings start fresh on each launch.
 
 While either screen is open, the loop draws the panel and skips updates,
 spawning, collisions, and course state logging. That freezes movement,
@@ -282,6 +291,7 @@ asteroidfield.py    imports asteroid, constants
 player.py           imports circleshape, constants, shot, bomb
 background.py       imports constants
 controls.py         imports pygame; draws the shared start/help panel
+sounds.py           uses Python tools and pygame to synthesize and play music/effects
 logger.py           uses Python's own tools to write game-state/event logs
 main.py             brings together settings, logging, game objects, and drawing helpers
 ```
@@ -322,6 +332,7 @@ file = what that object is and does, `main.py` = how objects interact.
 | [background.py](background.py) | `make_starfield`, `load_background` | Creates the star image used by the game. The alternative image-loading function exists but is not called by `main.py`. |
 | [controls.py](controls.py) | `CONTROLS`, `draw_controls` | Stores instruction rows and draws the start/help panel. It does not decide when play is paused; `main.py` does. |
 | [logger.py](logger.py) | `SpriteInfo`, `GroupInfo`, `log_state`, `log_event` | Describes and saves records for inspecting gameplay. It does not control ship movement or decide collisions. |
+| [sounds.py](sounds.py) | `EFFECTS`, `make_sound`, `make_music`, `SoundEffects` | Synthesizes original music/effects once and manages playback, mute, and shared volume. Main passes this manager to the ship. |
 
 <a id="core-mechanisms" name="core-mechanisms"></a>
 
@@ -898,7 +909,7 @@ does not change which key `Player.update()` reads.
    and position their centers along the panel's horizontal middle. Its
    `color="white"` input supplies white when no color is passed.
 5. `enumerate(CONTROLS)` supplies both each row number and its pair of
-   strings. The row number times 38 controls spacing; one string is drawn
+   strings. The row number times 30 controls spacing; one string is drawn
    in the left key-label column and the other in the right explanation column.
 6. Draw the bonus-item explanation, movement note, and start/resume prompt.
    The `paused` input selects whether the heading and prompt say to start
@@ -1041,8 +1052,10 @@ This is the startup sequence in the order the code performs it. Keep
 3. **The final guard calls `main()`.** Because this file was launched directly,
    `__name__` is `"__main__"`, so the bottom call actually starts the game
    function. Python does not start a function just because it was defined.
-4. **`main()` prints startup information and initializes Pygame.** It makes
-   the clock, opens the 1280-by-720 window, and sets the title.
+4. **`main()` prints startup information and initializes Pygame.** It requests
+   a short audio buffer before initialization, then makes the sound manager,
+   clock, and 1280-by-720 window. Sound generation happens once; an unavailable
+   audio device switches audio to silent mode while graphics can still start.
 5. **It makes reusable drawing resources.** `make_starfield()` creates the
    background once. The three font objects describe the lettering for
    status text, the panel title, and smaller instructions.
@@ -1270,7 +1283,9 @@ and `radius`. Ship setup adds `rotation`, `shoot_timer`,
 `invulnerable_timer`, `shield_timer`, `speed_boost_timer`, `weapon`, and
 `bombs_left`. All timers start at zero, the angle starts at zero, the weapon
 name is `"single"`, and the bomb supply is three. Score and lives are not
-stored here: main stores them separately.
+stored here: main stores them separately. The `sounds` field remembers the
+audio manager supplied by main, or None when a ship is created without audio
+for a small example. It does not create a second music loop for the ship.
 
 **Geometry helpers in source order:**
 
@@ -1284,7 +1299,7 @@ stored here: main stores them separately.
 
 | Method and inputs | What it does and why | Result or changed values |
 | --- | --- | --- |
-| `__init__(self, x, y)` | Calls shared setup, then adds the ship values described above. | Initializes this ship; returns no result value. |
+| `__init__(self, x, y, sounds=None)` | Calls shared setup, stores the optional sound manager, then adds the ship values described above. | Initializes this ship; returns no result value. Old `Player(x, y)` examples remain valid and silent. |
 | `triangle(self)` | Uses the angle to calculate a forward arrow and a sideways arrow; places the nose ahead of the center and two corners behind it. Both drawing and contact checks need these same corners. | Returns a list of three x/y positions. |
 | `draw(self, screen)` | Draws the shield ring if its timer is positive, then skips the triangle during alternating respawn-protection blink intervals; otherwise draws the white triangle. | Changes the picture only. The shield alone does not cause blinking. |
 | `rotate(self, dt)` | Adds turn speed times dt to the facing angle. Passing negative dt changes the turn direction. | Changes `rotation`; it does not rotate existing bullets. |
@@ -1293,8 +1308,8 @@ stored here: main stores them separately.
 | `is_protected(self)` | Checks whether respawn protection OR the collected shield still has time remaining. | Returns a yes/no value that main uses before applying collision damage. |
 | `apply_powerup(self, kind)` | Selects the matching timer for the text `"shield"` or `"speed"` and resets it to the configured duration. | Changes a timer; does not itself remove the collected item. Main removes the item after calling this. |
 | `collides_with(self, other)` | Gets the triangle corners, checks whether the other object's center is inside, then checks its distance to every triangle edge. | Returns True if the ship touches that object's circle, otherwise False; replaces the shared circle-only check. |
-| `shoot(self)` | Stops if the firing countdown is positive; otherwise looks up the selected weapon, resets the countdown, creates one bullet per angle, and assigns their velocities. | Creates `Shot` objects in the assigned groups; does not return a bullet list or award points. |
-| `drop_bomb(self)` | Stops if none remain; otherwise uses one bomb and creates a `Bomb` at the current ship coordinates. | Reduces `bombs_left` and creates an object; does not apply its eventual damage. |
+| `shoot(self)` | Stops if the firing countdown is positive; otherwise looks up the selected weapon, resets the countdown, creates one bullet per angle, assigns their velocities, and requests one firing sound. | Creates `Shot` objects in the assigned groups; a spread volley makes one sound, and an attempt during cooldown makes none. |
+| `drop_bomb(self)` | Stops if none remain; otherwise uses one bomb, creates a `Bomb` at the current ship coordinates, and requests its drop sound. | Reduces `bombs_left` and creates an object; an empty supply does not produce a false confirmation sound. |
 | `update(self, dt)` | Reduces all four timers, reads held keys, turns/thrusts/selects/fires, applies drag, moves using velocity, then handles screen edges. | Advances this ship for one active frame. Its order explains why thrust, slowdown, and motion must be considered together. |
 
 **Connections.** The ship can create bullets and bombs because their
@@ -1592,7 +1607,7 @@ Rects for positioning, and rectangle drawing. The window and already-created
 fonts are arguments passed by main, so this file does not need to import
 main or construct another window.
 
-**What it stores.** `CONTROLS` is a tuple of eight pairs of displayed strings.
+**What it stores.** `CONTROLS` is a tuple of ten pairs of displayed strings.
 Each pair says what to print in the key column and the action column. These
 are instructions for a person, not actual keyboard bindings. The local
 `shade`, `panel`, `rendered`, row `index`, `key`, `action`, and `y` values
@@ -1612,7 +1627,7 @@ does not draw anything until a later `centered(...)` call runs its body.
 
 **Worked example.** A 900-by-600 panel centered in a 1280-by-720 window
 starts at x=190 and y=60: `(1280 - 900) / 2` and `(720 - 600) / 2`.
-For row index 2, the formula `panel.top + 150 + index * 38` gives y=286.
+For row index 2, the formula `panel.top + 150 + index * 30` gives y=270.
 The key text goes at x=230, while the action text goes at x=465.
 These are positions within this fixed layout, not automatically responsive columns.
 
@@ -1715,10 +1730,13 @@ the object files smaller while giving the whole game one explicit order.
 | `Player`, `Asteroid`, `AsteroidField`, `Shot`, `Particle`, `PowerUp`, `Bomb` from their respective files | Assign each blueprint's groups and create the initial ship/creator; main also creates random bonus items. Individual bullets, fragments, and bombs are created by their relevant object functions. |
 | `spawn_explosion` from `particle.py` | Make visible effects for bomb damage. Rock splitting calls the same helper from the rock file. |
 | `make_starfield` from `background.py`, `draw_controls` from `controls.py` | Prepare the background and draw the shared start/help panel. |
+| `SoundEffects` from `sounds.py` | Build the music/effects manager once, use it for audio controls and main-handled events, and pass it to the ship for firing/drop sounds. |
 
 **What it stores.** `clock` measures/limits frame time, `dt` is elapsed
 seconds, `screen` is where drawing happens, `background` is the star image,
-and `font`, `title_font`, and `help_font` describe lettering. Six groups
+and `font`, `title_font`, and `help_font` describe lettering. `sounds` refers
+to the shared audio manager, which owns mute, volume, cached audio, and
+playback channels. Six groups
 organize the objects: `updatable`, `drawable`, `asteroids`, `shots`,
 `powerups`, and `bombs`. `player` and `asteroid_field` refer to the two
 initial objects. `score`, `lives`, `started`, and `showing_help` describe
@@ -1734,7 +1752,7 @@ object or message currently being processed, not separate saved game systems.
 | Prepare drawing resources | Create the star image and fonts. | These are reused instead of repeatedly recreated during gameplay. |
 | Create collections and assign `containers` | Make empty groups, then tell each class which ones its new objects join. | Assignment must precede the initial ship/creator and later object creation. |
 | Create initial objects and overall values | Make ship and invisible creator; initialize score, lives, and menu flags. | These should not reset on every frame. |
-| Start the repeating loop and read events | Accept close, Esc, Enter, H, and B under their stated conditions. | Menu/quit controls must still be read while gameplay is paused. B calls the ship only during active play. |
+| Start the repeating loop and read events | Accept close, Esc, Enter, H, B, M, and volume keys under their stated conditions. | Menu/quit/audio controls still work while paused; B calls the ship only during active play. |
 | Handle start/help screen | Draw the appropriate panel, present it, cap redraw speed, set dt to zero, and continue. | Skipping everything below this branch pauses movement and game timers. |
 | Log and update | Save occasional state, then call `updatable.update(dt)`. | Object positions and countdowns change before main uses them for this frame's interactions. |
 | Apply bomb explosions | For each detonated bomb, score/remove overlapping rocks and create visual effects, then remove the bomb. | Those removed rocks do not appear in the later fresh rock-contact pass. |
@@ -1745,7 +1763,8 @@ object or message currently being processed, not separate saved game systems.
 
 After the function definition, the `if __name__ == "__main__"` guard calls
 it only when this file is launched directly. A window-close or Esc request
-returns out of main; the final lost life uses `sys.exit()`. Nothing here
+returns out of main; the final lost life lets the 0.3-second damage sound
+finish when audio is enabled and unmuted, then uses `sys.exit()`. Nothing here
 loops back to a restart screen after game over.
 
 ```text
@@ -1775,6 +1794,109 @@ instructions execute. Main must take the help branch and skip updates and
 interactions to freeze gameplay. The same distinction separates a picture
 of an explosion from the distance calculation that actually applies damage.
 
+<a id="chapter-sounds" name="chapter-sounds"></a>
+
+### File 14: sounds.py — original arcade music and action effects
+
+**Open the source:** [sounds.py](sounds.py). [Back to contents](#contents).
+
+**Its job and why it exists.** This file creates sounds mathematically,
+loads them into Pygame once, and plays them when another part of the game
+requests a named event. It also creates an original eight-second background
+loop using a bright melody, lower bass notes, and simple drum-like sounds.
+There are no downloaded tracks or separate sound assets to find or install.
+Keeping generation and playback here prevents the ship and main loop from
+having to calculate thousands of audio samples while processing a hit.
+
+**What it brings in:**
+
+| Tool | Purpose |
+| --- | --- |
+| `io` | Make an in-memory file so a valid WAV recording can be loaded without writing it to disk. |
+| `math` | Calculate sine waves, pitch changes, and fading curves. A wave's frequency is the number of repetitions per second; higher frequency sounds higher. |
+| `random` | Supply repeatable noise for impacts/percussion. Each generator has its own seed and does not consume the random choices used for rocks or bonus items. |
+| `struct` | Encode each calculated amplitude as the two bytes used for a signed 16-bit audio sample. |
+| `wave` | Write a WAV header describing sample rate, channel count, and sample size, followed by the encoded samples. |
+| `pygame` | Load the WAV data as Sound objects and play them on the audio mixer. |
+
+**What it stores.** `EFFECTS` maps ten event names to recipes containing
+duration, starting pitch, ending pitch, and noise amount. `SoundEffects`
+stores `enabled`, `muted`, `volume`, cached `effects`, the generated `music`,
+and dedicated `shot_channel` and `music_channel` playback objects. The
+default master setting is 0.5, or 50%; music receives another factor of
+0.35 so it stays behind the action. These are session settings, not saved
+preferences that persist after closing the game.
+
+**Functions in source order:**
+
+| Function and inputs | Work performed | Result and connection |
+| --- | --- | --- |
+| `make_sound(duration, start_pitch, end_pitch, noise)` | Generates amplitude samples at 44,100 per second, slides the pitch, mixes the requested fraction of noise, fades the edges, and writes a mono WAV into memory. | Returns one Pygame Sound. The mixer converts the source recording to the playback format if needed. |
+| `make_music()` | Generates eight seconds at 22,050 samples per second. Each 0.125-second step selects a melody note/rest; four two-second bars use A minor, F major, G major, and E major chords. Low sine-wave bass and short noise/thump percussion accompany the pulse-wave melody. | Returns the original loop as one cached Pygame Sound; playback repeats the recording rather than recomposing every frame. |
+| `SoundEffects.__init__(self)` | Checks whether the mixer initialized, allocates sixteen channels, reserves zero for weapons and one for music, creates the effects/music, sets volumes, and starts looping music. | With no device, reports silent mode and returns. A Pygame audio setup/conversion error also disables audio instead of closing the game. |
+| `play(self, name)` | Returns immediately if audio is unavailable or muted; otherwise finds the requested effect. `shoot_` events use the weapon channel; other effects use a free unreserved channel. | Starts playback without waiting. A new shot can replace an old shot on that channel, while music has its own reserved channel. |
+| `toggle_mute(self)` | Reverses the mute setting. On mute, stops current playback. On unmute, restarts the music loop. | Old shots and impacts are not replayed; later successful actions can request new effects. |
+| `change_volume(self, amount)` | Adds the adjustment, rounds it, and limits it to 0–1. Applies it to all effects and the quieter music. | Changing volume while muted remembers the level but leaves mute active. |
+| `status_text(self)` | Builds the sound-percentage/mute/key label, or reports an unavailable device. | Returns text that main renders on both instruction screens and during play. It does not draw the label itself. |
+
+A **sample** is one measurement of a sound wave's amplitude at an instant.
+In an effect, `index / rate` converts its sample number to seconds. A sine
+wave supplies a smooth tone, while random amplitudes supply rough noise.
+The changing phase in `make_sound` produces the rising or falling pitch.
+Its envelope is a multiplier that brings the volume in gently and then
+reduces it toward the end, avoiding an abrupt full-amplitude start/stop.
+
+`struct.pack("<h", value)` encodes a sample as a two-byte signed integer
+with the byte order required here. `wave` adds the recording description,
+and `buffer.seek(0)` returns to the beginning so Pygame reads that header
+before the samples. The separate `random.Random(...)` objects make audio
+generation repeatable without changing the gameplay's random sequence.
+
+Music uses a different recipe: short pulse-wave notes for a retro melody,
+smoother low bass, a rapidly fading kick-like tone, and quiet noise ticks.
+`None` entries leave melody rests while the rhythm continues. At four
+steps per half-second beat, the loop has a 120-beats-per-minute pulse.
+The beginning/end fade softens the join when the cached recording repeats.
+It evokes old electronic arcade music without copying a game's melody.
+
+**Where audio requests happen:**
+
+| Event | Code requesting playback | Why it is requested there |
+| --- | --- | --- |
+| Successful weapon volley | `Player.shoot` after making all its bullets | One sound per accepted firing action, rather than per spread bullet or per held-key frame. |
+| Successful bomb drop | `Player.drop_bomb` after creating it | An empty bomb supply returns before playing confirmation. |
+| Bullet destroys a rock | Main's bullet-hit branch | That branch knows an actual hit occurred; simply drawing a nearby bullet should make no impact sound. |
+| Bomb explosion | Main's detonated-bomb branch | One blast per bomb, even if many rocks are destroyed. |
+| Ship loses a life | Main's unprotected ship-hit branch | Protected contact makes no false damage warning. The final hit has a short sound-completion wait before exit. |
+| Collected shield/speed item | Main's item-contact branch | The saved item kind selects the corresponding rising tone only when collected. |
+| Music | Sound-manager setup and leaving mute | Playback is not tied to sprite updates, so it continues during menu/help screens. |
+
+**Worked example.** At master volume 0.5, each action effect's playback
+setting is 0.5 and music's is `0.5 * 0.35 = 0.175`. These multiply already
+restrained generated sample amplitudes; 50% is a software setting, not a
+measurement of speaker loudness. Pressing minus changes master to 0.4 and
+music to 0.14. Pressing M stops both, keeping 0.4 remembered. Pressing plus
+while muted changes the remembered setting to 0.5 but stays silent until M
+is pressed again.
+
+**Check your understanding.** Why do sounds continue while sprites are
+paused? **Answer:** Pygame's mixer plays its channels independently after
+being asked to start. The help branch skips sprite updates, but does not
+stop the music channel. Main still reads M and volume events before that
+branch, so the player can silence or adjust it while reading.
+
+If no audio device opens, the HUD says `Sound: unavailable` and game actions
+continue silently. Available effect channels are finite: when every
+unreserved channel is busy, another non-weapon effect may not play. Weapon
+and music slots remain reserved. No audio setting or effect changes collision
+geometry, score values, or how many bombs the ship has.
+
+In this WSL Ubuntu environment, playback initially failed because the native
+`libpulse0` library was missing, even though WSLg's audio server existed.
+Installing that library restored audio. The game needs no additional Python
+audio package, but the operating system still needs a usable audio device and
+its client libraries. Silent fallback keeps play available if those are absent.
+
 <a id="value-ownership" name="value-ownership"></a>
 
 ### Who stores and changes each important value?
@@ -1800,6 +1922,7 @@ its name. These are not copies kept automatically in sync across files.
 | Bomb `fuse`, `detonated` | Each Bomb instance | Bomb update counts down and sets the signal | Main reads the signal to apply damage; bomb drawing reads the fuse for flashing. |
 | Dot `age`, `lifetime` | Each Particle instance | Setup saves lifetime; update increments age | Update removes expired dots; drawing calculates fading. |
 | Logging counters, flags, start time | Module-level names in `logger.py` | Import-time assignments and logging functions | Logging decides whether to sample, append/replace output, and record timing. |
+| Audio `volume`, `muted`, cached effects/music | One `SoundEffects` manager created by main | Audio key events call its adjustment methods; setup generates recordings once | Main displays status; ship/main request events; the mixer independently plays the cached audio, including while help pauses sprite updates. |
 
 <a id="code-origins" name="code-origins"></a>
 
@@ -1816,6 +1939,7 @@ its name. These are not copies kept automatically in sync across files.
 | `Player`, `CircleShape`, `Shot`, `AsteroidField` | This project's Python files | Blueprints defined by this game, using Python and Pygame to implement its particular behavior. |
 | `shoot`, `drop_bomb`, `apply_powerup`, `spawn_explosion` | This project's definitions | Their names are chosen here. Their bodies determine what happens; Python has no built-in rule saying a function called shoot must create bullets. |
 | `PLAYER_MAX_SPEED`, `WEAPONS` | This project's `constants.py` | Chosen settings, not Pygame's built-in limits. |
+| `SoundEffects`, `make_sound`, `make_music` | This project's `sounds.py` | Our sound manager and synthesis functions; they use Python to build recordings and Pygame to play them. |
 
 For a name you do not recognize, first look at the imports and definitions
 in that file. Follow a local import into its source file. A dot often helps:
@@ -2089,7 +2213,7 @@ claims have been implemented.
 - **Bombs, bonuses, and lives have different creation rules.** You start with
   three bombs and cannot replenish them in this code. Only bullet hits run
   the random collectible-creation check. There are no extra-life items.
-- **There is no restart, save/load, sound system, or enemy ship here.** Losing
+- **There is no restart, save/load, or enemy ship here.** Losing
   the final life exits; running `uv run main.py` again starts a new game.
 - **Some settings are older course leftovers.** `PLAYER_SPEED`,
   `PLAYER_SHOOT_SPEED`, and `PLAYER_SHOOT_COOLDOWN_SECONDS` are defined but
@@ -2121,6 +2245,7 @@ claims have been implemented.
 | Background image | `background.load_background` and the call in `main.py` | Add the referenced file under `assets`; open the display before `.convert()` |
 | Help-panel appearance | `draw_controls` in `controls.py` | Its panel size and row spacing are literal numbers; this function draws help but does not pause the game itself |
 | Log detail or frequency | `logger.py` | Frame limits, sampled member limit, output formats, and any course checks that read them |
+| Effects, music, or initial volume | `sounds.py`: `EFFECTS`, `make_music`, and `SoundEffects` | Ship methods request shot/drop effects; main requests hits/bonuses/blasts and handles M/volume events. Update instruction text if keys change. |
 
 <a id="understanding-questions" name="understanding-questions"></a>
 

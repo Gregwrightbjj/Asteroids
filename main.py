@@ -19,6 +19,7 @@ from powerup import PowerUp  # look in powerup.py and bring in the PowerUp class
 from bomb import Bomb  # look in bomb.py and bring in the Bomb class, a blueprint for a bomb; main.py checks when its countdown finishes and destroys nearby rocks
 from background import make_starfield  # look in background.py and bring in the make_starfield function; calling it builds the black image with stars that will be drawn behind the game
 from controls import draw_controls  # look in controls.py and bring in the draw_controls function; calling it draws the keyboard instructions on the start screen or the paused help screen
+from sounds import SoundEffects  # look in sounds.py and bring in the manager that generates arcade effects and music, remembers volume/mute, and plays named events without stopping the game loop
 
 
 def main():  # define the main game function; its setup runs once, then its while loop handles the game repeatedly until the player exits
@@ -26,7 +27,9 @@ def main():  # define the main game function; its setup runs once, then its whil
     print(f"Screen width: {SCREEN_WIDTH}")  # print the configured window width in the terminal; {SCREEN_WIDTH} inserts that setting's numeric value into the text
     print(f"Screen height: {SCREEN_HEIGHT}")  # print the configured window height in the terminal; {SCREEN_HEIGHT} inserts that setting's numeric value into the text
 
-    pygame.init()  # initialize Pygame's systems, including the display and fonts, before trying to open a window or draw text
+    pygame.mixer.pre_init(44100, -16, 2, 512)  # request a small audio buffer before initialization, reducing the delay between an action and its sound; graphics can still start if no audio device opens
+    pygame.init()  # initialize Pygame's systems, including the display, fonts, and audio mixer, before using them
+    sounds = SoundEffects()  # generate and cache the effects/music once, or continue in silent mode if this computer has no working audio device
     clock = pygame.time.Clock()  # create a timing object that measures time between frames and makes the loop wait when needed to stay near 60 frames per second
     dt = 0.0  # set elapsed frame time to zero; before the first frame or after a menu pause, objects must not jump forward using old elapsed time
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))  # open the game window at the requested width/height and save its drawing surface, an image-like object, in screen
@@ -51,7 +54,7 @@ def main():  # define the main game function; its setup runs once, then its whil
     PowerUp.containers = (powerups, updatable, drawable)  # tell collectible shield/speed items to join their own collection, update their position/lifetime, and appear on screen
     Bomb.containers = (bombs, updatable, drawable)  # tell dropped bombs to join their own collection, update their countdown, and draw their flashing shape
 
-    player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)  # create the ship in the window's center; dividing width and height by two gives the horizontal and vertical halfway points
+    player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, sounds=sounds)  # create the centered ship and give it the sound manager so successful shots and bomb drops can be heard
     asteroid_field = AsteroidField()  # create the invisible object that produces rocks; its setup adds it to updatable, so the game calls its update function along with the visible objects
 
     score = 0  # start the player's total points at zero; main() owns this value because bullets and bombs can both increase it
@@ -66,7 +69,13 @@ def main():  # define the main game function; its setup runs once, then its whil
             if event.type == pygame.KEYDOWN:  # handle a key-press event; this branch runs when a press is received rather than checking every frame whether the key is held
                 if event.key == pygame.K_ESCAPE:  # check whether the pressed key was Esc; the return below exits main() from gameplay or either instruction screen
                     return  # leave main() immediately, ending the game loop and closing the program after this close-button or Esc request
-                if event.key == pygame.K_RETURN:  # check whether Enter was pressed; RETURN is Pygame's name for Enter, which starts the game or resumes from help
+                if event.key == pygame.K_m:  # accept M on the start screen, while paused, or during play to mute/unmute both music and effects
+                    sounds.toggle_mute()  # reverse the mute setting and immediately stop current audio or restart the background loop
+                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):  # accept the ordinary minus key or the numeric keypad minus key as volume down
+                    sounds.change_volume(-0.1)  # reduce master volume by ten percentage points, keeping it in the zero-to-one range
+                elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):  # accept the equals/plus key or keypad plus so increasing volume does not require a particular Shift-key layout
+                    sounds.change_volume(0.1)  # increase master volume by ten percentage points; if muted, remember the new level without unmuting
+                elif event.key == pygame.K_RETURN:  # check whether Enter was pressed; RETURN is Pygame's name for Enter, which starts the game or resumes from help
                     started = True  # mark the game as started so the next frames can update movement, create asteroids, and check collisions
                     showing_help = False  # close the instructions after Enter is pressed; the game can now reach the movement and collision code below
                 elif event.key == pygame.K_h and started:  # otherwise check for H, but accept it only after the game has started; and requires both conditions to be true
@@ -80,6 +89,8 @@ def main():  # define the main game function; its setup runs once, then its whil
                 for obj in drawable:  # go through the objects that should be visible; obj refers to one ship, rock, bullet, or other object at a time
                     obj.draw(screen)  # call the current object's own drawing method, so each type draws its correct shape onto the same screen
             draw_controls(screen, title_font, help_font, paused=started)  # draw instructions using the two fonts; paused=started tells the function whether to show the start message or the paused/resume message
+            audio_label = help_font.render(sounds.status_text(), True, "white")  # turn the current audio setting into text so volume and mute changes are visible even before playing
+            screen.blit(audio_label, (SCREEN_WIDTH - audio_label.get_width() - 15, 15))  # place audio status above the instruction panel near the window's top-right corner
             pygame.display.flip()  # make the completed frame visible in the window after all its background, objects, and text have been drawn
             clock.tick(60)  # wait if needed so the start/help screen does not redraw more than roughly 60 times per second and waste processing power
             dt = 0.0  # set elapsed frame time to zero; before the first frame or after a menu pause, objects must not jump forward using old elapsed time
@@ -91,6 +102,7 @@ def main():  # define the main game function; its setup runs once, then its whil
 
         for bomb in bombs:  # check dropped bombs one at a time; bomb refers to the current bomb, which may or may not have finished its countdown
             if bomb.detonated:  # only process this bomb's explosion when its update method has set detonated to True after its fuse reaches zero
+                sounds.play("bomb_blast")  # play one deep blast per bomb, avoiding a stack of identical sounds when it destroys several nearby rocks
                 for asteroid in asteroids:  # go through the current rocks one at a time; asteroid refers to the particular rock being checked during this pass
                     if bomb.position.distance_to(asteroid.position) <= BOMB_BLAST_RADIUS + asteroid.radius:  # compare center-to-center distance with explosion radius plus rock radius; this also destroys rocks whose edge overlaps the blast
                         score += asteroid.points()  # ask this rock how many points its size is worth and add that amount to score; += means add and store the new total
@@ -102,15 +114,19 @@ def main():  # define the main game function; its setup runs once, then its whil
         for powerup in powerups:  # look at each collectible shield or speed-boost item one at a time; powerup is the current item and powerups is the collection of them
             if player.collides_with(powerup):  # ask whether the ship touches this item; calling the player's method uses the ship's triangular shape rather than a simple circle
                 player.apply_powerup(powerup.kind)  # give the ship this item's effect; kind contains shield or speed, which determines which temporary protection or speed timer starts
+                sounds.play(powerup.kind)  # use the collected item's shield/speed name to choose its distinct rising confirmation tone
                 powerup.kill()  # remove the collected shield/speed item from every group so it disappears and cannot be collected repeatedly
 
         for asteroid in asteroids:  # go through the current rocks one at a time; asteroid refers to the particular rock being checked during this pass
             if not player.is_protected() and player.collides_with(asteroid):  # damage the ship only if it has neither shield nor respawn protection AND its triangular shape touches this rock
                 log_event("player_hit")  # write a player_hit entry to the course event log so the collision can be checked later
+                sounds.play("ship_hit")  # play the damage warning only when an unprotected collision actually removes a life
                 lives -= 1  # subtract one from the remaining lives; -= means subtract the value and save the result back into the same variable
                 asteroid.split()  # remove the hit rock and show its explosion; medium or large rocks also create two smaller rocks moving in different directions
                 if lives <= 0:  # check whether the ship has used its final life; <= includes both zero and any negative value
                     print("Game over!")  # write Game over! in the terminal to explain why the game is about to close
+                    if sounds.enabled and not sounds.muted:  # allow the final damage sound to finish before ending the process, unless the player deliberately muted audio
+                        pygame.time.wait(300)  # wait for the short damage sound only after the final life is lost, without adding delay to ordinary gameplay
                     sys.exit()  # end the Python program immediately because no lives remain
                 player.respawn()  # move the ship back to the center, stop its movement, reset its direction, and grant a short period of protection
                 continue  # start the next rock check because this rock was destroyed by hitting the ship; skip bullet checks against that removed rock
@@ -118,6 +134,7 @@ def main():  # define the main game function; its setup runs once, then its whil
             for shot in shots:  # inside the current rock's loop, check every bullet against that rock; shot refers to one bullet at a time
                 if asteroid.collides_with(shot):  # test whether the circular areas of this rock and this bullet touch or overlap, meaning the bullet hit the rock
                     log_event("asteroid_shot")  # write an asteroid_shot entry to the course event log whenever a bullet hits a rock
+                    sounds.play("rock_hit")  # play a brief impact when a bullet actually hits, rather than when a shot merely passes nearby
                     score += asteroid.points()  # ask this rock how many points its size is worth and add that amount to score; += means add and store the new total
                     asteroid.split()  # remove the hit rock and show its explosion; medium or large rocks also create two smaller rocks moving in different directions
                     if random.random() < POWERUP_DROP_CHANCE:  # choose a decimal from 0 up to 1 and compare it with 0.15, giving each bullet-destroyed rock a 15% chance to leave a collectible item
@@ -142,6 +159,8 @@ def main():  # define the main game function; its setup runs once, then its whil
 
         hint = help_font.render("H: controls / pause", True, "white")  # create a small white text image reminding the player that H pauses the game and opens the keyboard instructions
         screen.blit(hint, (SCREEN_WIDTH - hint.get_width() - 15, 15))  # draw the help reminder at the top right; subtract its text width and 15 pixels from the screen width to leave a right-hand margin
+        audio_label = help_font.render(sounds.status_text(), True, "white")  # make a visible readout of mute state and master volume while the game is running
+        screen.blit(audio_label, (SCREEN_WIDTH - audio_label.get_width() - 15, 45))  # draw the audio readout below the help hint, keeping it separate from the score/lives text on the left
 
         pygame.display.flip()  # make the completed frame visible in the window after all its background, objects, and text have been drawn
         dt = clock.tick(60) / 1000  # limit play to about 60 frames per second and convert the measured milliseconds to seconds; the next update uses this duration for movement and timers

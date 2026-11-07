@@ -9,6 +9,8 @@ CONTROLS = (  # store the instruction rows in a tuple, an ordered collection; ea
     ("3 / 4", "Rapid fire / heavy piercing shot"),  # instruction row explaining that key 3 selects fast firing and key 4 selects large bullets that continue after hitting a rock
     ("B", "Drop a bomb (3 per game; 2-second fuse)"),  # instruction row explaining the three-bomb supply and the two-second countdown between dropping a bomb and its explosion
     ("H", "Pause and show / hide controls"),  # instruction row explaining that H stops game movement and timers while showing help, then resumes play when pressed again
+    ("M", "Mute / unmute music and effects"),  # explain the audio toggle, which works during play and while either instruction screen is open
+    ("- / +", "Lower / raise master volume"),  # explain volume adjustments; equals on the main keyboard also increases volume without requiring Shift
     ("Esc", "Quit the game"),  # instruction row explaining that Esc closes the game from gameplay, the start screen, or paused help
 )
 
@@ -30,7 +32,7 @@ def draw_controls(screen, title_font, text_font, paused=False):  # define the fu
     centered("PAUSED - CONTROLS" if paused else "ASTEROIDS", title_font, panel.top + 55)  # show PAUSED - CONTROLS when paused is True, otherwise ASTEROIDS; use the large font and place its center 55 pixels below the panel top
     centered("Destroy asteroids, collect power-ups, and survive.", text_font, panel.top + 105)  # draw the game's goal below the heading using the smaller font; power-ups means the shield/speed items collected by touching them
     for index, (key, action) in enumerate(CONTROLS):  # read the instruction rows one at a time; enumerate supplies a zero-based row number and (key, action) separates the two strings in each pair
-        y = panel.top + 150 + index * 38  # calculate this row's vertical coordinate: start 150 pixels below the panel top and add 38 pixels for every preceding row
+        y = panel.top + 150 + index * 30  # place instruction rows thirty pixels apart so the movement, weapons, help, audio, and quit controls fit inside the same panel
         screen.blit(text_font.render(key, True, "cyan"), (panel.left + 40, y))  # create a cyan text image of the key label and draw it in the left column, 40 pixels from the panel's left edge
         screen.blit(text_font.render(action, True, "white"), (panel.left + 275, y))  # create a white text image explaining that key and draw it in the right column at the same row height
     centered("Cyan pickup: shield | Yellow pickup: speed boost", text_font, panel.top + 485)  # explain that touching a cyan collectible grants temporary protection, while touching a yellow collectible temporarily increases speed; these items are called pickups

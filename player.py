@@ -43,7 +43,7 @@ def point_in_triangle(p, a, b, c):  # define a helper that checks whether point 
 
 
 class Player(CircleShape):  # define Player, a blueprint for making ships; (CircleShape) means build on that existing blueprint's position, motion, and screen-edge functions, then add the ship-specific code below
-    def __init__(self, x, y):  # define the setup Python runs when Player(x, y) creates a ship; self means that particular ship, so self.rotation and the other values belong to it
+    def __init__(self, x, y, sounds=None):  # define setup for one ship; x/y place it, and optional sounds supplies the game's audio manager while allowing simple examples to create a silent ship
         super().__init__(x, y, PLAYER_RADIUS)  # run CircleShape's setup to store the ship's position and size, start its velocity at zero, and join the groups assigned in main.py
         self.rotation = 0  # set the ship's facing angle to zero degrees; the triangle-building formula points the initial ship downward because screen y increases downward
         self.shoot_timer = 0  # start with no firing delay remaining; shoot() can fire immediately and then sets this timer to the selected weapon's delay
@@ -52,6 +52,7 @@ class Player(CircleShape):  # define Player, a blueprint for making ships; (Circ
         self.speed_boost_timer = 0.0  # start with no speed bonus; touching a yellow speed item starts this timer and temporarily raises acceleration and maximum speed
         self.weapon = "single"  # store single as the selected weapon name; this string chooses the matching settings dictionary inside WEAPONS
         self.bombs_left = BOMB_START_COUNT  # give this ship the starting supply of three bombs; the value decreases whenever a bomb is successfully dropped
+        self.sounds = sounds  # remember the supplied audio manager so firing and bomb-drop methods can request a sound after an action succeeds
 
     def triangle(self) -> list[pygame.Vector2]:  # define a function that gives back the ship's three corner positions; -> list[pygame.Vector2] is a note saying the result is a list of x/y pairs
         forward = pygame.Vector2(0, 1).rotate(self.rotation)  # start with an arrow one unit long pointing downward, then turn it by the ship's current angle; this gives the nose direction before multiplying by the ship's size
@@ -111,12 +112,16 @@ class Player(CircleShape):  # define Player, a blueprint for making ships; (Circ
         for angle in weapon["angles"]:  # create one bullet for each angle in this weapon's list; [0] makes one straight bullet, while [-15, 0, 15] makes three spread bullets
             shot = Shot(self.position.x, self.position.y, weapon["radius"], weapon["pierce"])  # create a bullet at the ship's current x/y position using the selected bullet size and whether it can continue after hitting a rock
             shot.velocity = pygame.Vector2(0, 1).rotate(self.rotation + angle) * weapon["speed"]  # aim the bullet along the ship's facing angle plus its spread offset, then multiply the direction arrow by the weapon's bullet speed
+        if self.sounds is not None:  # request audio only when this ship has been connected to a sound manager
+            self.sounds.play("shoot_" + self.weapon)  # play one weapon-specific sound after the successful volley, so spread shots do not make three overlapping copies
 
     def drop_bomb(self):  # define how B places a stationary bomb at the ship's position; the method must first check that the limited supply has not run out
         if self.bombs_left <= 0:  # stop if zero bombs remain; <= also prevents accidental negative supplies from allowing another bomb
             return  # leave drop_bomb() without creating anything because the ship has already used its entire bomb supply
         self.bombs_left -= 1  # subtract one from this ship's remaining bomb supply before creating the bomb so each accepted drop spends exactly one
         Bomb(self.position.x, self.position.y)  # create a bomb at the ship's current coordinates; its inherited setup joins the groups assigned to Bomb.containers in main.py
+        if self.sounds is not None:  # keep a ship created without audio usable in isolated examples and checks
+            self.sounds.play("bomb_drop")  # confirm the successful drop; the early return for an empty supply prevents a misleading confirmation sound
 
     def update(self, dt: float) -> None:  # run the ship's timers, held-key controls, slowdown, movement, and edge wrapping each active frame; dt is elapsed seconds and no result is returned
         self.shoot_timer -= dt  # subtract elapsed seconds from the firing delay so the ship can shoot again when the timer reaches zero or becomes negative
