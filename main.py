@@ -26,7 +26,7 @@ def main():  # def starts a function; the whole game runs inside main()
     shots = pygame.sprite.Group()  # only bullets; keep the name `shots`, the lesson tests read it
 
     Player.containers = (updatable, drawable)  # groups every new Player auto-joins; set on the CLASS, before any Player exists
-    Asteroid.containers = (asteroids, updatable, drawable)  # every Asteroid lands in all 3 groups
+    Asteroid.containers = (asteroids, updatable, drawable)  # every Asteroid (including split ones) lands in all 3 groups
     AsteroidField.containers = (updatable,)  # only updatable; the comma makes a 1-item tuple
     Shot.containers = (shots, updatable, drawable)  # every bullet lands in all 3 groups
 
@@ -48,11 +48,11 @@ def main():  # def starts a function; the whole game runs inside main()
                 print("Game over!")  # must match exactly, capital G and the "!"
                 sys.exit()  # stops the whole program right away
 
-            for shot in shots:  # T1: nested loop = a loop inside a loop; checks EVERY bullet against THIS asteroid. Ex: 2 asteroids x 3 bullets = 6 checks per frame
+            for shot in shots:  # nested loop: checks EVERY bullet against THIS asteroid
                 if asteroid.collides_with(shot):  # True when this bullet touches this asteroid
-                    log_event("asteroid_shot")  # T1.1: records the hit; text must match exactly
-                    asteroid.kill()  # T1.2: kill() = built-in Sprite method; removes the object from ALL its groups, so nothing updates or draws it and it vanishes
-                    shot.kill()  # the bullet is used up, so it goes too
+                    log_event("asteroid_shot")  # records the hit; text must match exactly
+                    asteroid.split()  # T3.9: replaces asteroid.kill(); split() kills it AND spawns the smaller ones
+                    shot.kill()  # the bullet is used up whatever size the asteroid was; stays as kill()
 
         screen.fill("black")  # paints every pixel black, wiping the last frame
         for obj in drawable:  # visit each drawable object one by one
