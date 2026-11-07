@@ -5,7 +5,7 @@ from logger import log_state, log_event  # log_event writes to game_events.jsonl
 from player import Player  # main.py must know the name Player to create one
 from asteroid import Asteroid  # needed to set Asteroid.containers below
 from asteroidfield import AsteroidField  # the spawner
-from shot import Shot  # NEW: needed to set Shot.containers below
+from shot import Shot  # needed to set Shot.containers below
 
 
 def main():  # def starts a function; the whole game runs inside main()
@@ -22,13 +22,13 @@ def main():  # def starts a function; the whole game runs inside main()
 
     updatable = pygame.sprite.Group()  # Group = container for many game objects; this one needs update()
     drawable = pygame.sprite.Group()  # this one needs draw(); an object can be in several groups
-    asteroids = pygame.sprite.Group()  # only asteroids, so collisions can check them without the player
-    shots = pygame.sprite.Group()  # T3: only bullets; keep the name `shots`, the lesson's test reads it from the log
+    asteroids = pygame.sprite.Group()  # only asteroids
+    shots = pygame.sprite.Group()  # only bullets; keep the name `shots`, the lesson tests read it
 
     Player.containers = (updatable, drawable)  # groups every new Player auto-joins; set on the CLASS, before any Player exists
     Asteroid.containers = (asteroids, updatable, drawable)  # every Asteroid lands in all 3 groups
     AsteroidField.containers = (updatable,)  # only updatable; the comma makes a 1-item tuple
-    Shot.containers = (shots, updatable, drawable)  # T4: static field (stored on the class); every bullet lands in all 3 groups; must be set BEFORE any Shot exists
+    Shot.containers = (shots, updatable, drawable)  # every bullet lands in all 3 groups
 
     player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)  # instantiate = create an object; starts at the center
     asteroid_field = AsteroidField()  # the spawner
@@ -43,10 +43,16 @@ def main():  # def starts a function; the whole game runs inside main()
         updatable.update(dt)  # calls update(dt) on every member: player keys, asteroids, bullets, spawn timer
 
         for asteroid in asteroids:  # iterate = visit each asteroid one by one
-            if asteroid.collides_with(player):  # True when the circles touch
+            if asteroid.collides_with(player):  # True when the circles touch (distance <= r1 + r2)
                 log_event("player_hit")  # records the hit in game_events.jsonl
                 print("Game over!")  # must match exactly, capital G and the "!"
                 sys.exit()  # stops the whole program right away
+
+            for shot in shots:  # T1: nested loop = a loop inside a loop; checks EVERY bullet against THIS asteroid. Ex: 2 asteroids x 3 bullets = 6 checks per frame
+                if asteroid.collides_with(shot):  # True when this bullet touches this asteroid
+                    log_event("asteroid_shot")  # T1.1: records the hit; text must match exactly
+                    asteroid.kill()  # T1.2: kill() = built-in Sprite method; removes the object from ALL its groups, so nothing updates or draws it and it vanishes
+                    shot.kill()  # the bullet is used up, so it goes too
 
         screen.fill("black")  # paints every pixel black, wiping the last frame
         for obj in drawable:  # visit each drawable object one by one
